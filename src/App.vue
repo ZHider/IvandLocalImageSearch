@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, Transition } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import type { MenuOption } from 'naive-ui'
 
@@ -66,18 +66,22 @@ function handleMenuUpdate(key: string) {
       </n-layout-header>
       <n-layout-content class="content">
         <n-message-provider>
-          <RouterView />
+          <RouterView v-slot="{ Component }">
+            <Transition name="page" mode="out-in">
+              <component :is="Component" />
+            </Transition>
+          </RouterView>
         </n-message-provider>
       </n-layout-content>
     </n-layout>
   </n-config-provider>
 </template>
-
 <style scoped>
 .app-layout {
   height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow: clip;
 }
 
 .header-bar {
@@ -89,18 +93,26 @@ function handleMenuUpdate(key: string) {
   max-width: 100%;
 }
 
-.app-logo {
-  font-size: 24px;
-}
-
-.app-title {
-  font-size: 16px;
-  font-weight: 600;
-  white-space: nowrap;
-}
 
 .nav-menu {
   flex-shrink: 0;
+}
+/* ---- 页面切换动画 ---- */
+.page-enter-active,
+.page-leave-active {
+  transition: opacity 0.12s ease;
+}
+.page-enter-from,
+.page-leave-to {
+  opacity: 0;
+}
+
+/* ---- 导航栏悬浮动画 ---- */
+.nav-menu :deep(.n-menu-item) {
+  transition: transform 0.1s ease;
+}
+.nav-menu :deep(.n-menu-item:hover) {
+  transform: translateY(-1px);
 }
 
 .content {

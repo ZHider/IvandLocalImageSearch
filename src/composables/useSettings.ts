@@ -43,6 +43,10 @@ export function useSettings() {
     } else if (value === 'openai' && !config.value.endpoint) {
       config.value.endpoint = 'https://api.openai.com'
       config.value.customEmbeddingPath = '/v1/embeddings'
+    }
+      else if (value === 'llamacpp' && !config.value.endpoint) {
+      config.value.endpoint = 'http://localhost:8080'
+      config.value.customEmbeddingPath = '/embedding'
     } else if (value === 'custom') {
       config.value.customProviderName = ''
       config.value.customEmbeddingPath = '/v1/embeddings'

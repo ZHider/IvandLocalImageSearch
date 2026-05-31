@@ -41,7 +41,7 @@ async function testConnection() {
 
 <template>
   <div class="settings-container">
-    <n-card title="⚙️ 设置" class="settings-card">
+    <n-card title="⚙️ 设置" class="settings-card" content-style="padding-bottom: 0">
       <n-form
         ref="formRef"
         :model="config"
@@ -131,11 +131,4 @@ async function testConnection() {
   margin: 0 auto;
 }
 
-.settings-card :deep(.n-card__content) {
-  padding-bottom: 8px;
-}
-
-.settings-card :deep(.n-form-item:last-child) {
-  margin-top: 24px;
-}
 </style>
