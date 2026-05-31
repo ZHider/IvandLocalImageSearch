@@ -31,6 +31,8 @@ const searchImagePath = ref('')
 const searching = ref(false)
 const results = ref<SearchResult[]>([])
 const previewImage = ref<string | null>(null)
+const previewLoading = ref(false)
+const previewItem = ref<SearchResult | null>(null)
 
 const showPreview = computed({
   get: () => previewImage.value !== null,
@@ -38,6 +40,10 @@ const showPreview = computed({
     if (!val) previewImage.value = null
   },
 })
+
+const previewImgClass = computed(() =>
+  previewLoading.value ? 'preview-image preview-loading' : 'preview-image'
+)
 
 const containerRef = ref<HTMLElement | null>(null)
 const scrollTop = ref(0)
@@ -133,6 +139,20 @@ onMounted(() => {
     const d = data as { imagePath: string; error: string }
     console.warn(`缩略图生成失败: ${d.imagePath}`, d.error)
   })
+
+  on('previewReady', (data: unknown) => {
+    const d = data as { imagePath: string; previewData: string }
+    if (d.previewData) {
+      previewImage.value = d.previewData
+      previewLoading.value = false
+    }
+  })
+
+  on('previewError', (data: unknown) => {
+    const d = data as { imagePath: string; error: string }
+    previewLoading.value = false
+    message.error(`加载预览失败: ${d.error}`)
+  })
 })
 
 async function selectImage() {
@@ -215,12 +235,21 @@ function doSearchOnEnter(e: KeyboardEvent) {
   }
 }
 
-function openPreview(imagePath: string) {
-  previewImage.value = imagePath
+function openPreview(item: SearchResult) {
+  previewItem.value = item
+  previewLoading.value = true
+  // 立即显示已有缩略图
+  const thumb = getThumbSrc(item.file_path, item.thumbnail_path)
+  if (thumb) {
+    previewImage.value = thumb
+  }
+  send('getPreview', { imagePath: item.file_path })
 }
 
 function closePreview() {
   previewImage.value = null
+  previewItem.value = null
+  previewLoading.value = false
 }
 
 function formatSize(bytes: number): string {
@@ -338,7 +367,7 @@ onUnmounted(() => {
             class="result-card"
             :style="{ height: ITEM_HEIGHT + 'px' }"
           >
-            <div class="card-thumb" @click="openPreview(item.file_path)">
+            <div class="card-thumb" @click="openPreview(item)">
               <img
                 v-if="getThumbSrc(item.file_path, item.thumbnail_path)"
                 :src="getThumbSrc(item.file_path, item.thumbnail_path)"
@@ -387,15 +416,61 @@ onUnmounted(() => {
       v-model:show="showPreview"
       preset="card"
       title="图片预览"
-      style="max-width: 90vw"
+      style="max-width: 90vw; max-height: 90vh; overflow-y: auto;"
       :on-close="closePreview"
       :mask-closable="true"
     >
-      <img
-        v-if="previewImage"
-        :src="`file://${(previewImage || '').replace(/\\/g, '/')}`"
-        class="preview-image"
-      />
+      <div v-if="previewImage" class="preview-image-wrap">
+        <div class="preview-img-container">
+          <img :src="previewImage" :class="previewImgClass" />
+          <div v-if="previewLoading" class="preview-loader">加载中…</div>
+        </div>
+      </div>
+      <div v-if="previewItem" class="preview-meta">
+        <div class="meta-row">
+          <span class="meta-label">文件名</span>
+          <span class="meta-value">{{ previewItem.file_name }}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">路径</span>
+          <span class="meta-value meta-path">{{ previewItem.file_path }}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">文件大小</span>
+          <span class="meta-value">{{ formatSize(previewItem.file_size) }}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">相似度</span>
+          <span class="meta-value" :style="{ color: getSimilarityColor(previewItem.similarity) }">
+            {{ formatSimilarity(previewItem.similarity) }}
+          </span>
+        </div>
+        <div v-if="previewItem.exif" class="meta-divider">EXIF 信息</div>
+        <div v-if="previewItem.exif && previewItem.exif.date_taken" class="meta-row">
+          <span class="meta-label">拍摄时间</span>
+          <span class="meta-value">{{ previewItem.exif.date_taken }}</span>
+        </div>
+        <div v-if="(previewItem.exif && previewItem.exif.camera_make) || (previewItem.exif && previewItem.exif.camera_model)" class="meta-row">
+          <span class="meta-label">相机</span>
+          <span class="meta-value">{{ [previewItem.exif.camera_make, previewItem.exif.camera_model].filter(Boolean).join(' ') }}</span>
+        </div>
+        <div v-if="previewItem.exif && previewItem.exif.iso" class="meta-row">
+          <span class="meta-label">ISO</span>
+          <span class="meta-value">{{ previewItem.exif.iso }}</span>
+        </div>
+        <div v-if="previewItem.exif && previewItem.exif.aperture" class="meta-row">
+          <span class="meta-label">光圈</span>
+          <span class="meta-value">{{ previewItem.exif.aperture }}</span>
+        </div>
+        <div v-if="previewItem.exif && previewItem.exif.shutter_speed" class="meta-row">
+          <span class="meta-label">快门速度</span>
+          <span class="meta-value">{{ previewItem.exif.shutter_speed }}</span>
+        </div>
+        <div v-if="previewItem.exif && previewItem.exif.focal_length" class="meta-row">
+          <span class="meta-label">焦距</span>
+          <span class="meta-value">{{ previewItem.exif.focal_length }}</span>
+        </div>
+      </div>
     </n-modal>
   </div>
 </template>
@@ -530,5 +605,70 @@ onUnmounted(() => {
   max-height: 70vh;
   object-fit: contain;
   border-radius: 4px;
+  transition: opacity 0.3s;
+}
+
+.preview-loading {
+  object-fit: fill;
+  opacity: 0.6;
+  filter: blur(2px);
+}
+
+.preview-image-wrap {
+  text-align: center;
+}
+
+.preview-img-container {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+}
+
+.preview-loader {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.5);
+  z-index: 1;
+}
+
+.preview-meta {
+  border-top: 1px solid #eee;
+  padding-top: 12px;
+  font-size: 13px;
+}
+
+.meta-row {
+  display: flex;
+  padding: 4px 0;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.meta-label {
+  min-width: 72px;
+  color: #999;
+  flex-shrink: 0;
+}
+
+.meta-value {
+  color: #333;
+  word-break: break-all;
+}
+
+.meta-path {
+  font-size: 12px;
+  color: #666;
+}
+
+.meta-divider {
+  font-size: 12px;
+  color: #999;
+  margin: 8px 0 4px;
+  font-weight: 500;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 4px;
 }
 </style>

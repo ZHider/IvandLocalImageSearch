@@ -9,6 +9,7 @@ mod text_chunker;
 mod vector_store;
 mod ws_client;
 
+use std::io::Write;
 use std::time::SystemTime;
 use std::io::Read;
 
@@ -20,8 +21,19 @@ fn log(level: &str, msg: &str) {
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default();
-    eprintln!("[RUST_EXT {} {}] {}", now.as_secs(), level, msg);
+    let line = format!("[RUST_EXT {} {}] {}\n", now.as_secs(), level, msg);
+    eprint!("{}", line);
+
+    // 同时写入日志文件
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("logs/extension.log")
+    {
+        let _ = f.write_all(line.as_bytes());
+    }
 }
+
 
 fn log_info(msg: &str) {
     log("INFO", msg);
@@ -33,6 +45,8 @@ fn log_error(msg: &str) {
 
 #[tokio::main]
 async fn main() {
+    // 确保 logs 目录存在
+    let _ = std::fs::create_dir_all("logs");
     log_info("========================================");
     log_info("Rust 扩展进程启动");
     log_info(&format!("进程 PID: {}", std::process::id()));
@@ -111,68 +125,76 @@ async fn main() {
 
                 match serde_json::from_str::<IncomingMessage>(&text_str) {
                     Ok(incoming) => {
-                        log_info(&format!(
-                            "解析消息 -> event: {:?}, data: {:?}",
-                            incoming.event, incoming.data
-                        ));
+                        let Some(event) = incoming.event else {
+                            // 非扩展事件（如 app.broadcast 回显），静默跳过
+                            continue;
+                        };
 
-                        if let Some(event) = incoming.event {
-                            match event.as_str() {
-                                "ping" => {
-                                    events::handle_ping(
-                                        &conn.token,
-                                        incoming.data.unwrap_or(serde_json::json!({})),
-                                        &mut conn.write,
-                                    )
+                        log_info(&format!("收到事件: {}", event));
+
+                        match event.as_str() {
+                            "ping" => {
+                                events::handle_ping(
+                                    &conn.token,
+                                    incoming.data.unwrap_or(serde_json::json!({})),
+                                    &mut conn.write,
+                                )
+                                .await;
+                            }
+                            "testApiConnection" => {
+                                events::handle_test_api_connection(
+                                    &conn.token,
+                                    incoming.data.unwrap_or(serde_json::json!({})),
+                                    &mut conn.write,
+                                )
+                                .await;
+                            }
+                            "saveConfig" => {
+                                events::handle_save_config(
+                                    &conn.token,
+                                    incoming.data.unwrap_or(serde_json::json!({})),
+                                    &mut conn.write,
+                                )
+                                .await;
+                            }
+                            "loadConfig" => {
+                                events::handle_load_config(&conn.token, &mut conn.write)
                                     .await;
-                                }
-                                "testApiConnection" => {
-                                    events::handle_test_api_connection(
-                                        &conn.token,
-                                        incoming.data.unwrap_or(serde_json::json!({})),
-                                        &mut conn.write,
-                                    )
-                                    .await;
-                                }
-                                "saveConfig" => {
-                                    events::handle_save_config(
-                                        &conn.token,
-                                        incoming.data.unwrap_or(serde_json::json!({})),
-                                        &mut conn.write,
-                                    )
-                                    .await;
-                                }
-                                "loadConfig" => {
-                                    events::handle_load_config(&conn.token, &mut conn.write)
-                                        .await;
-                                }
-                                "startIndex" => {
-                                    events::handle_start_index(
-                                        &conn.token,
-                                        incoming.data.unwrap_or(serde_json::json!({})),
-                                        &mut conn.write,
-                                    )
-                                    .await;
-                                }
-                                "search" => {
-                                    events::handle_search(
-                                        &conn.token,
-                                        incoming.data.unwrap_or(serde_json::json!({})),
-                                        &mut conn.write,
-                                    )
-                                    .await;
-                                }
-                                "getThumbnail" => {
-                                    events::handle_get_thumbnail(
-                                        &conn.token,
-                                        incoming.data.unwrap_or(serde_json::json!({})),
-                                        &mut conn.write,
-                                    )
-                                    .await;
-                                }
-                                other => {
-                                    log_info(&format!("收到未知事件: {}", other));
-                                }
+                            }
+                            "startIndex" => {
+                                events::handle_start_index(
+                                    &conn.token,
+                                    incoming.data.unwrap_or(serde_json::json!({})),
+                                    &mut conn.write,
+                                )
+                                .await;
+                            }
+                            "search" => {
+                                events::handle_search(
+                                    &conn.token,
+                                    incoming.data.unwrap_or(serde_json::json!({})),
+                                    &mut conn.write,
+                                )
+                                .await;
+                            }
+                            "getThumbnail" => {
+                                events::handle_get_thumbnail(
+                                    &conn.token,
+                                    incoming.data.unwrap_or(serde_json::json!({})),
+                                    &mut conn.write,
+                                )
+                                .await;
+                            }
+                            "getPreview" => {
+                                events::handle_get_preview(
+                                    &conn.token,
+                                    incoming.data.unwrap_or(serde_json::json!({})),
+                                    &mut conn.write,
+                                )
+                                .await;
+                            }
+                            _ => {
+                                log_info(&format!("未知事件: {}", event));
                             }
                         }
                     }

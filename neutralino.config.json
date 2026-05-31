@@ -1,4 +1,8 @@
 {
+  "logging": {
+    "enabled": true,
+    "writeToLogFile": true
+  },
   "applicationId": "localimagesearch",
   "version": "1.0.0",
   "defaultMode": "window",
@@ -11,6 +15,7 @@
     "app.*",
     "os.*",
     "filesystem.*",
+    "server.*",
     "storage.*",
     "debug.log",
     "extensions.*",

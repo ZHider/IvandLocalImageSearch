@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { os } from '@neutralinojs/lib'
 import { useMessage } from 'naive-ui'
 import { useExtension } from '../composables/useExtension'
-
+import { useConfig } from '../composables/useConfig'
 interface IndexProgress {
   phase: string
   current: number
@@ -33,9 +33,9 @@ interface IndexComplete {
 
 const message = useMessage()
 const { send, on } = useExtension()
+const { config: sharedConfig } = useConfig()
 
 const folders = ref<string[]>([])
-const fullConfig = ref<Record<string, unknown> | null>(null)
 const indexing = ref(false)
 const addFolderDisabled = ref(false)
 
@@ -50,18 +50,12 @@ const phaseLabels: Record<string, string> = {
   cleanup: '清理旧数据',
 }
 
+// 从共享配置同步文件夹列表
+watch(() => sharedConfig.value.folders, (val) => {
+  folders.value = [...val]
+}, { immediate: true })
+
 onMounted(() => {
-  send('loadConfig', {})
-
-  on('configLoaded', (data: unknown) => {
-    const configData = data as Record<string, unknown> | null
-    if (configData) {
-      fullConfig.value = configData
-      const folderData = configData.folders as string[] | undefined
-      folders.value = folderData || []
-    }
-  })
-
   on('indexProgress', (data: unknown) => {
     progress.value = data as IndexProgress
   })
@@ -88,6 +82,7 @@ onMounted(() => {
   })
 })
 
+
 onUnmounted(() => {
   indexing.value = false
   progress.value = null
@@ -97,13 +92,26 @@ onUnmounted(() => {
 async function addFolder() {
   try {
     addFolderDisabled.value = true
-    const selectedPath = await os.showFolderDialog('选择要索引的文件夹')
-    if (selectedPath && !folders.value.includes(selectedPath)) {
-      folders.value.push(selectedPath)
+    const selected = await os.showOpenDialog('选择文件夹内的图片（将自动添加该文件夹到索引）', {
+      multiSelections: true,
+      filters: [{ name: '所有文件', extensions: ['*'] }],
+    })
+    if (selected && selected.length > 0) {
+      const dirs = new Set(
+        selected.map((p: string) => {
+          const i = Math.max(p.lastIndexOf('\\'), p.lastIndexOf('/'))
+          return i >= 0 ? p.substring(0, i) : p
+        })
+      )
+      for (const dir of dirs) {
+        if (!folders.value.includes(dir)) {
+          folders.value.push(dir)
+        }
+      }
       saveFolders()
     }
   } catch {
-    message.error('选择文件夹失败')
+    message.error('选择文件失败')
   } finally {
     addFolderDisabled.value = false
   }
@@ -115,7 +123,7 @@ function removeFolder(index: number) {
 }
 
 function saveFolders() {
-  const config = { ...(fullConfig.value || {}), folders: folders.value }
+  const config = { ...sharedConfig.value, folders: folders.value }
   send('saveConfig', config)
 }
 

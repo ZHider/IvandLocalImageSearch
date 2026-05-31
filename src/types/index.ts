@@ -1,4 +1,4 @@
-export type ApiType = 'ollama' | 'llamacpp' | 'openai' | 'custom' | ''
+export type ApiType = 'openai' | 'custom' | ''
 
 export interface AppConfig {
   apiType: ApiType
@@ -23,6 +23,7 @@ export const DEFAULT_CONFIG: AppConfig = {
 export interface ApiTestResult {
   success: boolean
   message: string
+  models?: string[]
 }
 
 export interface ApiConnectionParams {

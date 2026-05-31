@@ -59,6 +59,7 @@ fn entries_to_batch(entries: &[VectorEntry]) -> Result<RecordBatch, String> {
         return Err("entries_to_batch: empty slice".into());
     }
     let dim = entries[0].vector.len() as i32;
+    log_info(&format!("entries_to_batch: 条目数 {}, 向量维数 {}", entries.len(), dim));
     let schema = make_schema(dim);
 
     let n = entries.len();
@@ -194,10 +195,10 @@ impl VectorStore {
             let mut merge: MergeInsertBuilder = tbl.merge_insert(&["id"]);
             merge.when_matched_update_all(None);
             merge.when_not_matched_insert_all();
-            // Create an iterator of Result<RecordBatch, ArrowError> items
+            let schema = batch.schema();
             let batch_iter = vec![Ok(batch)].into_iter();
             let reader =
-                arrow_array::RecordBatchIterator::new(batch_iter, make_schema(0));
+                arrow_array::RecordBatchIterator::new(batch_iter, schema);
             merge
                 .execute(Box::new(reader))
                 .await

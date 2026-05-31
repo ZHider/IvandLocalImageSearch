@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import type { FormInst } from 'naive-ui'
 import { useMessage } from 'naive-ui'
 import { useSettings, API_TYPE_OPTIONS, FORM_RULES } from '../composables/useSettings'
@@ -18,7 +18,12 @@ const {
   saveConfig: doSave,
 } = useSettings()
 
-const { testing, testConnection: doTest } = useApiTest(config)
+const { testing, testConnection: doTest, availableModels } = useApiTest(config)
+
+
+const modelOptions = computed(() =>
+  availableModels.value.map((m) => ({ label: m, value: m }))
+)
 
 async function saveConfig() {
   try {
@@ -90,12 +95,14 @@ async function testConnection() {
         </n-form-item>
 
         <n-form-item label="模型名称" path="modelName">
-          <n-input
+          <n-select
             v-model:value="config.modelName"
-            placeholder="例如: llava:13b"
+            :options="modelOptions"
+            :filterable="true"
+            :tag="true"
+            placeholder="选择或输入模型名称，点击测试连接获取可用模型列表"
           />
         </n-form-item>
-
 
         <n-form-item>
           <n-space>

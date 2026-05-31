@@ -2,6 +2,7 @@ use serde::Deserialize;
 
 use serde_json::Value;
 use std::collections::HashMap;
+use base64::{engine::general_purpose::STANDARD, Engine};
 
 use crate::config::{self, AppConfig};
 use crate::embedding::{self, ApiConfig, create_client};
@@ -63,6 +64,15 @@ pub async fn handle_test_api_connection(token: &str, data: Value, write: &mut Ws
         "创建 {} 客户端, base_url: {}, model: {}",
         config.provider, config.base_url, config.model
     ));
+    log_info(&format!(
+        "vision_model: {}",
+        config.vision_model.as_deref().unwrap_or("(无)")
+    ));
+    log_info(&format!(
+        "将请求 GET {}/models 检测连通性",
+        config.base_url.trim_end_matches('/')
+    ));
+
 
     let client = match embedding::create_client(&config) {
         Ok(c) => c,
@@ -83,27 +93,36 @@ pub async fn handle_test_api_connection(token: &str, data: Value, write: &mut Ws
     };
 
     match client.health_check().await {
-        Ok(true) => {
-            log_info("health_check 成功");
+        Ok(models) if models.is_empty() => {
+            log_error("health_check 返回空列表，服务可能不兼容");
+            let _ = ws_client::send_broadcast(
+                token,
+                "apiConnectionResult",
+                serde_json::json!({
+                    "success": false,
+                    "message": "服务返回空模型列表",
+                }),
+                write,
+            )
+            .await;
+        }
+        Ok(models) => {
+            log_info(&format!(
+                "health_check 成功，获取到 {} 个可用模型",
+                models.len()
+            ));
+            let model_list: Vec<&str> = models.iter().map(|s| s.as_str()).collect();
+            for m in &models {
+                log_info(&format!("  - 可用模型: {}", m));
+            }
+            log_info("连接成功");
             let _ = ws_client::send_broadcast(
                 token,
                 "apiConnectionResult",
                 serde_json::json!({
                     "success": true,
                     "message": "连接成功",
-                }),
-                write,
-            )
-            .await;
-        }
-        Ok(false) => {
-            log_error("health_check 返回 false");
-            let _ = ws_client::send_broadcast(
-                token,
-                "apiConnectionResult",
-                serde_json::json!({
-                    "success": false,
-                    "message": "服务不可用",
+                    "models": model_list,
                 }),
                 write,
             )
@@ -111,12 +130,16 @@ pub async fn handle_test_api_connection(token: &str, data: Value, write: &mut Ws
         }
         Err(e) => {
             log_error(&format!("health_check 失败: {}", e));
+            log_info(&format!(
+                "请确认 {} 正确且服务已启动",
+                config.base_url
+            ));
             let _ = ws_client::send_broadcast(
                 token,
                 "apiConnectionResult",
                 serde_json::json!({
                     "success": false,
-                    "message": e,
+                    "message": format!("{}", e),
                 }),
                 write,
             )
@@ -210,25 +233,10 @@ fn is_text_file(path: &str) -> bool {
 }
 
 fn config_to_api_config(config: &AppConfig) -> ApiConfig {
-    let provider = match config.api_type.as_str() {
-        "ollama" => "ollama".to_string(),
-        "llamacpp" | "openai" | "custom" => "openai".to_string(),
-        _ => "openai".to_string(),
-    };
-
-    let base_url = if config.api_type == "custom" {
-        let endpoint = config.endpoint.trim_end_matches('/');
-        let path = config
-            .custom_embedding_path
-            .as_deref()
-            .unwrap_or("/v1/embeddings");
-        format!("{}{}", endpoint, path)
-    } else {
-        config.endpoint.clone()
-    };
+    let base_url = config.endpoint.trim_end_matches('/').to_string();
 
     ApiConfig {
-        provider,
+        provider: "openai".to_string(),
         base_url,
         api_key: config.api_key.clone(),
         model: config.model_name.clone(),
@@ -458,7 +466,7 @@ pub async fn handle_start_index(token: &str, data: Value, write: &mut WsWriter) 
 
         if is_image_file(&entry.file_path) {
             match process_image_file(
-                client.as_ref(),
+                &client,
                 &entry.file_path,
                 &file_name,
                 entry.file_size,
@@ -468,6 +476,8 @@ pub async fn handle_start_index(token: &str, data: Value, write: &mut WsWriter) 
             .await
             {
                 Ok(entries) => {
+                    let dim = entries.first().map(|e| e.vector.len()).unwrap_or(0);
+                    log_info(&format!("batch_upsert 图片 {} 向量维数: {}", entry.file_path, dim));
                     if let Err(e) = store.batch_upsert(&entries).await {
                         error_count += 1;
                         log_error(&format!("写入向量存储失败 {}: {}", entry.file_path, e));
@@ -491,7 +501,7 @@ pub async fn handle_start_index(token: &str, data: Value, write: &mut WsWriter) 
             }
         } else if is_text_file(&entry.file_path) {
             match process_text_file(
-                client.as_ref(),
+                &client,
                 &entry.file_path,
                 &file_name,
                 entry.file_size,
@@ -573,7 +583,7 @@ pub async fn handle_start_index(token: &str, data: Value, write: &mut WsWriter) 
         )
         .await;
         if let Err(e) = store.create_index().await {
-            log_error(&format!("创建向量索引失败: {}", e));
+            log_info(&format!("索引提示: {}（数据量少时属于正常行为）", e));
         }
     }
 
@@ -599,7 +609,7 @@ pub async fn handle_start_index(token: &str, data: Value, write: &mut WsWriter) 
     .await;
 }
 async fn process_image_file(
-    client: &(dyn embedding::EmbeddingClient + Send),
+    client: &embedding::ApiClient,
     file_path: &str,
     file_name: &str,
     file_size: u64,
@@ -614,6 +624,7 @@ async fn process_image_file(
     let base64 = image_processing::resize_to_base64(file_path, 512)?;
 
     let vector = client.embed_image(&base64).await?;
+    log_info(&format!("向量维数: {}", vector.len()));
 
     let metadata = serde_json::json!({
         "file_path": file_path,
@@ -636,7 +647,7 @@ async fn process_image_file(
 }
 
 async fn process_text_file(
-    client: &(dyn embedding::EmbeddingClient + Send),
+    client: &embedding::ApiClient,
     file_path: &str,
     file_name: &str,
     file_size: u64,
@@ -660,6 +671,7 @@ async fn process_text_file(
 
     for (idx, chunk) in chunks.iter().enumerate() {
         let vector = client.embed_text(chunk).await?;
+        log_info(&format!("文本 chunk {} 向量维数: {}", idx, vector.len()));
 
         let entry_id = format!("{}__chunk_{}", file_path, idx);
 
@@ -822,7 +834,6 @@ pub async fn handle_search(token: &str, data: Value, write: &mut WsWriter) {
         }
     };
 
-    log_info(&format!("查询向量维度: {}", query_vector.len()));
 
     let store = match VectorStore::init().await {
         Ok(s) => s,
@@ -989,12 +1000,17 @@ pub async fn handle_get_thumbnail(token: &str, data: Value, write: &mut WsWriter
 
     match image_processing::generate_thumbnail(&req.image_path, 300) {
         Ok(path) => {
+            let filename = std::path::Path::new(&path)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
             let _ = ws_client::send_broadcast(
                 token,
                 "thumbnailReady",
                 serde_json::json!({
                     "imagePath": req.image_path,
-                    "thumbnailPath": path,
+                    "thumbnailPath": filename,
                 }),
                 write,
             )
@@ -1008,6 +1024,90 @@ pub async fn handle_get_thumbnail(token: &str, data: Value, write: &mut WsWriter
                 serde_json::json!({
                     "error": e,
                     "imagePath": req.image_path,
+                }),
+                write,
+            )
+            .await;
+        }
+    }
+}
+
+
+pub async fn handle_get_preview(token: &str, data: Value, write: &mut WsWriter) {
+    log_info("处理 getPreview 事件");
+
+    let image_path = match data.get("imagePath").and_then(|v| v.as_str()) {
+        Some(p) if !p.is_empty() => p.to_string(),
+        _ => {
+            log_error("getPreview: 图片路径为空");
+            let _ = ws_client::send_broadcast(
+                token,
+                "previewError",
+                serde_json::json!({ "error": "图片路径不能为空", "imagePath": "" }),
+                write,
+            )
+            .await;
+            return;
+        }
+    };
+
+    let is_small = std::fs::metadata(&image_path)
+        .map(|m| m.len() < 2 * 1024 * 1024)
+        .unwrap_or(false);
+
+    log_info(&format!("getPreview: 文件大小判断完成"));
+
+    let result: Result<String, String> = if is_small {
+        // 小于 2MB，直接读取原图，不压缩
+        let ext = std::path::Path::new(&image_path)
+            .extension()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_lowercase();
+        let mime = match ext.as_ref() {
+            "png" => "image/png",
+            "webp" => "image/webp",
+            "gif" => "image/gif",
+            "bmp" => "image/bmp",
+            _ => "image/jpeg",
+        };
+        match std::fs::read(&image_path) {
+            Ok(bytes) => Ok(format!("data:{};base64,{}", mime, STANDARD.encode(bytes))),
+            Err(e) => Err(format!("读取原图失败: {}", e)),
+        }
+    } else {
+        image_processing::resize_to_base64(&image_path, 800).map(|base64| {
+            let ext = std::path::Path::new(&image_path)
+                .extension()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_lowercase();
+            let mime = if ext == "png" { "image/png" } else { "image/jpeg" };
+            format!("data:{};base64,{}", mime, base64)
+        })
+    };
+
+    match result {
+        Ok(data_url) => {
+            let _ = ws_client::send_broadcast(
+                token,
+                "previewReady",
+                serde_json::json!({
+                    "imagePath": image_path,
+                    "previewData": data_url,
+                }),
+                write,
+            )
+            .await;
+        }
+        Err(e) => {
+            log_error(&format!("生成预览失败: {}", e));
+            let _ = ws_client::send_broadcast(
+                token,
+                "previewError",
+                serde_json::json!({
+                    "error": e,
+                    "imagePath": image_path,
                 }),
                 write,
             )

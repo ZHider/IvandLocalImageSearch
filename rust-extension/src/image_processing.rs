@@ -54,7 +54,7 @@ pub fn resize_to_base64(path: &str, max_size: u32) -> Result<String, String> {
     let w = w.max(1);
     let h = h.max(1);
 
-    let resized = img.resize_exact(w, h, FilterType::Lanczos3);
+    let resized = img.resize_exact(w, h, FilterType::Triangle);
 
     let mut buf = Cursor::new(Vec::new());
     resized

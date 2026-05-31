@@ -8,7 +8,9 @@ export function useExtension() {
   }
 
   function on(event: string, callback: (data: unknown) => void) {
-    events.on(event, callback)
+    events.on(event, (evt: CustomEvent) => {
+      callback(evt.detail)
+    })
   }
 
   return {

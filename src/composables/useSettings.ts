@@ -10,9 +10,7 @@ export interface ApiTypeOption {
 }
 
 export const API_TYPE_OPTIONS: ApiTypeOption[] = [
-  { label: 'Ollama', value: 'ollama' },
-  { label: 'llama.cpp', value: 'llamacpp' },
-  { label: 'OpenAI Compatible', value: 'openai' },
+  { label: 'OpenAI 兼容', value: 'openai' },
   { label: '自定义 API', value: 'custom' },
 ]
 
@@ -38,15 +36,9 @@ export function useSettings() {
 
   function onApiTypeChange(value: string) {
     config.value.apiType = value as ApiType
-    if (value === 'ollama' && !config.value.endpoint) {
-      config.value.endpoint = 'http://localhost:11434'
-    } else if (value === 'openai' && !config.value.endpoint) {
+    if (value === 'openai' && !config.value.endpoint) {
       config.value.endpoint = 'https://api.openai.com'
       config.value.customEmbeddingPath = '/v1/embeddings'
-    }
-      else if (value === 'llamacpp' && !config.value.endpoint) {
-      config.value.endpoint = 'http://localhost:8080'
-      config.value.customEmbeddingPath = '/embedding'
     } else if (value === 'custom') {
       config.value.customProviderName = ''
       config.value.customEmbeddingPath = '/v1/embeddings'

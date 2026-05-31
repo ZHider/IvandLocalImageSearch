@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref, watch, Transition } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
+import { server, filesystem } from '@neutralinojs/lib'
 import type { MenuOption } from 'naive-ui'
+import { useConfig } from './composables/useConfig'
 
 const router = useRouter()
 const route = useRoute()
@@ -48,6 +50,25 @@ watch(
 function handleMenuUpdate(key: string) {
   router.push(`/${key}`)
 }
+
+const { load: loadConfig } = useConfig()
+loadConfig()
+
+onMounted(async () => {
+  if (typeof window !== 'undefined' && window.NL_PORT) {
+    const thumbDir = window.NL_PATH + '/data/thumbnails'
+    try {
+      await filesystem.createDirectory(thumbDir)
+    } catch {
+      // 目录已存在，忽略
+    }
+    try {
+      await server.mount('/thumbnails', thumbDir)
+    } catch (e) {
+      console.warn('挂载缩略图目录失败:', e)
+    }
+  }
+})
 </script>
 
 <template>
