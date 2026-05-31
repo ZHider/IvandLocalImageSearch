@@ -1,0 +1,5 @@
+allowBuilds:
+  bufferutil: true
+  core-js: true
+  es5-ext: true
+  utf-8-validate: true

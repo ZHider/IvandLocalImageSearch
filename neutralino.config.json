@@ -1,0 +1,47 @@
+{
+  "applicationId": "localimagesearch",
+  "version": "1.0.0",
+  "defaultMode": "window",
+  "documentRoot": "/dist-vue/",
+  "url": "/",
+  "enableServer": true,
+  "enableNativeAPI": true,
+  "nativeAllowList": [
+    "app.*",
+    "os.*",
+    "filesystem.*",
+    "storage.*",
+    "debug.log"
+  ],
+  "modes": {
+    "window": {
+      "title": "Local Image Search",
+      "width": 1024,
+      "height": 768,
+      "minWidth": 800,
+      "minHeight": 600,
+      "fullScreen": false,
+      "alwaysOnTop": false,
+      "enableInspector": true,
+      "borderless": false,
+      "maximize": true,
+      "hidden": false,
+      "resizable": true,
+      "icon": "/public/favicon.svg",
+      "injectGlobals": true,
+      "injectClientLibrary": true
+    }
+  },
+  "cli": {
+    "binaryName": "localimagesearch",
+    "resourcesPath": "/dist-vue/",
+    "frontendLibrary": {
+      "patchFile": "/index.html",
+      "devUrl": "http://localhost:5173",
+      "projectPath": "/",
+      "initCommand": "pnpm install",
+      "devCommand": "pnpm dev",
+      "buildCommand": "pnpm build"
+    }
+  }
+}
