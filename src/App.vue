@@ -1,61 +1,110 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { app, os } from '@neutralinojs/lib'
+import { ref, watch } from 'vue'
+import { RouterView, useRouter, useRoute } from 'vue-router'
+import type { MenuOption } from 'naive-ui'
 
-const appName = ref('Local Image Search')
-const appVersion = ref('1.0.0')
-const neutralinoReady = ref(false)
-const currentDirectory = ref('')
-const environment = ref('检测中...')
+const router = useRouter()
+const route = useRoute()
 
-onMounted(async () => {
-  if (typeof window !== 'undefined' && window.NL_PORT) {
-    environment.value = 'Neutralinojs 桌面环境'
-    try {
-      const config = await app.getConfig()
-      appVersion.value = config?.version || window.NL_APPVERSION || '1.0.0'
-      neutralinoReady.value = true
-      
-      try {
-        const entries = await os.execCommand('cd')
-        currentDirectory.value = entries.stdOut.trim()
-      } catch (err) {
-        currentDirectory.value = '无法获取当前目录'
-      }
-      
-      console.log('Neutralino is ready, config:', config)
-    } catch (error) {
-      console.log('Neutralino API 调用失败:', error)
-      neutralinoReady.value = true
+const menuOptions: MenuOption[] = [
+  {
+    label: '🏠 首页',
+    key: 'home',
+  },
+  {
+    label: '🔍 搜索',
+    key: 'search',
+  },
+  {
+    label: '📂 索引管理',
+    key: 'index',
+  },
+  {
+    label: '⚙️ 设置',
+    key: 'settings',
+  },
+]
+
+const activeKey = ref<string>('search')
+
+watch(
+  () => route.path,
+  (path) => {
+    if (path === '/home') {
+      activeKey.value = 'home'
+    } else if (path.startsWith('/search')) {
+      activeKey.value = 'search'
+    } else if (path.startsWith('/index')) {
+      activeKey.value = 'index'
+    } else if (path.startsWith('/settings')) {
+      activeKey.value = 'settings'
+    } else {
+      activeKey.value = 'search'
     }
-  } else {
-    environment.value = '浏览器环境'
-    currentDirectory.value = window.location.origin
-    neutralinoReady.value = true
-  }
-})
+  },
+  { immediate: true }
+)
+
+function handleMenuUpdate(key: string) {
+  router.push(`/${key}`)
+}
 </script>
 
 <template>
   <n-config-provider>
-    <n-card title="Local Image Search" class="app-card">
-      <n-space vertical>
-        <n-space>
-          <n-tag type="success">Neutralinojs</n-tag>
-          <n-tag>Version: {{ appVersion }}</n-tag>
-        </n-space>
-        
-        <n-statistic label="运行环境" :value="environment" />
-        
-        <n-statistic label="工作目录" :value="currentDirectory || 'Loading...'" />
-      </n-space>
-    </n-card>
+    <n-layout class="app-layout">
+      <n-layout-header bordered>
+        <div class="header-bar">
+          <n-menu
+            v-model:value="activeKey"
+            :options="menuOptions"
+            mode="horizontal"
+            class="nav-menu"
+            @update:value="handleMenuUpdate"
+          />
+        </div>
+      </n-layout-header>
+      <n-layout-content class="content">
+        <n-message-provider>
+          <RouterView />
+        </n-message-provider>
+      </n-layout-content>
+    </n-layout>
   </n-config-provider>
 </template>
 
 <style scoped>
-.app-card {
-  max-width: 600px;
-  margin: 60px auto;
+.app-layout {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 56px;
+  padding: 0 20px;
+  max-width: 100%;
+}
+
+.app-logo {
+  font-size: 24px;
+}
+
+.app-title {
+  font-size: 16px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.nav-menu {
+  flex-shrink: 0;
+}
+
+.content {
+  flex: 1;
+  overflow: hidden;
 }
 </style>

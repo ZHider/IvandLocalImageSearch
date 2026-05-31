@@ -8,6 +8,14 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    warmup: {
+      clientFiles: [
+        './src/main.ts',
+        './src/App.vue',
+        './src/router/index.ts',
+        './src/pages/SearchPage.vue',
+      ],
+    },
   },
   build: {
     outDir: 'dist-vue',

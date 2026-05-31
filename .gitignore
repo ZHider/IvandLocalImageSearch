@@ -22,6 +22,7 @@ lerna-debug.log*
 bin/
 .tmp/
 resources/
+extensions/
 
 # Environment variables
 .env
@@ -63,3 +64,7 @@ coverage
 .vscode
 neutralinojs-tutorial
 
+# RUST
+target/
+protoc-include/
+protoc.exe

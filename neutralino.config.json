@@ -6,19 +6,30 @@
   "url": "/",
   "enableServer": true,
   "enableNativeAPI": true,
+  "enableExtensions": true,
   "nativeAllowList": [
     "app.*",
     "os.*",
     "filesystem.*",
     "storage.*",
-    "debug.log"
+    "debug.log",
+    "extensions.*",
+    "events.*"
+  ],
+  "extensions": [
+    {
+      "id": "ai.search.extension",
+      "commandWindows": "extensions\\ai-search-extension.exe",
+      "commandLinux": "${NL_PATH}/extensions/ai-search-extension",
+      "commandDarwin": "${NL_PATH}/extensions/ai-search-extension"
+    }
   ],
   "modes": {
     "window": {
-      "title": "Local Image Search",
-      "width": 1024,
-      "height": 768,
-      "minWidth": 800,
+      "title": "🔍 本地智能图片搜索",
+      "width": 1200,
+      "height": 800,
+      "minWidth": 900,
       "minHeight": 600,
       "fullScreen": false,
       "alwaysOnTop": false,
@@ -28,6 +39,9 @@
       "hidden": false,
       "resizable": true,
       "icon": "/public/favicon.svg",
+      "exitProcessOnClose": true,
+      "useSavedState": true,
+      "center": true,
       "injectGlobals": true,
       "injectClientLibrary": true
     }
@@ -42,6 +56,7 @@
       "initCommand": "pnpm install",
       "devCommand": "pnpm dev",
       "buildCommand": "pnpm build"
-    }
+    },
+    "binaryVersion": "6.7.0"
   }
 }
