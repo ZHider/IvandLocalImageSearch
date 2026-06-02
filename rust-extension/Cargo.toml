@@ -19,9 +19,11 @@ arrow-schema = "58"
 lancedb = "0.30"
 rusqlite = { version = "0.34", features = ["bundled"] }
 chrono = "0.4"
-image = "0.25"
+image = { version = "0.25", features = ["webp"] }
 rexif = "0.7"
 bincode = "1"
+heic = "0.1.6"
+webp = "0.3.1"
 
 [profile.release]
 strip = true

@@ -1,6 +1,7 @@
 use std::io::Read;
 use serde::{Deserialize, Serialize};
 use crate::file_utils;
+use crate::constants;
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct AppConfig {
@@ -16,6 +17,33 @@ pub struct AppConfig {
     pub custom_provider_name: Option<String>,
     #[serde(rename = "customEmbeddingPath", default)]
     pub custom_embedding_path: Option<String>,
+    #[serde(rename = "imageProcessing", default)]
+    pub image_processing: ImageProcessingConfig,
+}
+
+fn default_embed_image_size() -> u32 {
+    constants::DEFAULT_EMBEDDING_RESIZE
+}
+
+fn default_thumbnail_size() -> u32 {
+    constants::DEFAULT_THUMBNAIL_SIZE
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct ImageProcessingConfig {
+    #[serde(rename = "embedImageSize", default = "default_embed_image_size")]
+    pub embed_image_size: u32,
+    #[serde(rename = "thumbnailSize", default = "default_thumbnail_size")]
+    pub thumbnail_size: u32,
+}
+
+impl Default for ImageProcessingConfig {
+    fn default() -> Self {
+        Self {
+            embed_image_size: constants::DEFAULT_EMBEDDING_RESIZE,
+            thumbnail_size: constants::DEFAULT_THUMBNAIL_SIZE,
+        }
+    }
 }
 pub fn get_config_path() -> std::path::PathBuf {
     file_utils::get_data_dir().join("config.json")

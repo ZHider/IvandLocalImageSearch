@@ -1,7 +1,7 @@
 //! 全局常量定义，避免跨模块重复。
 
 /// 支持的图片文件扩展名
-pub const IMAGE_EXTS: &[&str] = &["jpg", "jpeg", "png", "gif", "bmp", "webp"];
+pub const IMAGE_EXTS: &[&str] = &["jpg", "jpeg", "png", "gif", "bmp", "webp", "heic", "heif"];
 
 /// 支持的文本文件扩展名
 pub const TEXT_EXTS: &[&str] = &["txt", "md"];
@@ -10,7 +10,9 @@ pub const TEXT_EXTS: &[&str] = &["txt", "md"];
 pub const DEFAULT_CHUNK_SIZE: usize = 512;
 pub const DEFAULT_CHUNK_OVERLAP: usize = 50;
 pub const DEFAULT_THUMBNAIL_SIZE: u32 = 300;
-pub const DEFAULT_EMBEDDING_RESIZE: u32 = 512;
+/// lossy WebP 编码质量 (0-100)
+pub const DEFAULT_WEBP_QUALITY: f32 = 80.0;
+pub const DEFAULT_EMBEDDING_RESIZE: u32 = 1280;
 pub const DEFAULT_PREVIEW_RESIZE: u32 = 800;
 pub const DEFAULT_TOP_K: usize = 50;
 

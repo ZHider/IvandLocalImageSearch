@@ -3,4 +3,5 @@
 3. 所有关于 neutralinojs 的教程和说明都在 `neutralinojs-tutorial` 目录下。
 4. 总是使用中文。
 5. **不要**编译release版本的rust程序，总是使用debug版本的。
+6. 编译时优先使用 cargo check 而不是 cargo build。
 

@@ -99,24 +99,30 @@ pub async fn handle_get_preview(token: &str, data: Value, write: &mut WsWriter) 
         }
     };
 
-    let is_small = std::fs::metadata(&image_path)
-        .map(|m| m.len() < constants::SMALL_FILE_THRESHOLD)
-        .unwrap_or(false);
+    let ext = std::path::Path::new(&image_path)
+        .extension()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_lowercase();
+
+    // HEIC/HEIF 浏览器不支持原生解码，始终走 decode→WebP 路径
+    let is_heic = ext == "heic" || ext == "heif";
+    let is_small = !is_heic
+        && std::fs::metadata(&image_path)
+            .map(|m| m.len() < constants::SMALL_FILE_THRESHOLD)
+            .unwrap_or(false);
 
     log_info(&format!("getPreview: 文件大小判断完成"));
 
     let result: Result<String, String> = if is_small {
-        // 小于 2MB，直接读取原图，不压缩
-        let ext = std::path::Path::new(&image_path)
-            .extension()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_lowercase();
+        // 小于 2MB 且非 HEIC，直接读取原图，不压缩
         let mime = match ext.as_ref() {
             "png" => "image/png",
             "webp" => "image/webp",
             "gif" => "image/gif",
             "bmp" => "image/bmp",
+            "heic" => "image/heic",
+            "heif" => "image/heif",
             _ => "image/jpeg",
         };
         match std::fs::read(&image_path) {
@@ -124,14 +130,9 @@ pub async fn handle_get_preview(token: &str, data: Value, write: &mut WsWriter) 
             Err(e) => Err(format!("读取原图失败: {}", e)),
         }
     } else {
-        image_processing::resize_to_base64(&image_path, constants::DEFAULT_PREVIEW_RESIZE).map(|base64| {
-            let ext = std::path::Path::new(&image_path)
-                .extension()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_lowercase();
-            let mime = if ext == "png" { "image/png" } else { "image/jpeg" };
-            format!("data:{};base64,{}", mime, base64)
+        // 大文件或浏览器不支持的格式（HEIC），走 decode→WebP 路径
+        image_processing::encode_base64(&image_path, constants::DEFAULT_PREVIEW_RESIZE).map(|base64| {
+            format!("data:image/webp;base64,{}", base64)
         })
     };
 

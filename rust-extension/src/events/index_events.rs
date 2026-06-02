@@ -124,6 +124,7 @@ async fn process_incremental_files(
     modified_count: usize,
     deleted_count: usize,
     now: &str,
+    opts: &image_processing::ProcessingOptions,
 ) -> ProcessResult {
     let mut processed_files: Vec<serde_json::Value> = Vec::new();
     let mut error_count = 0u32;
@@ -170,6 +171,7 @@ async fn process_incremental_files(
                 entry.file_size,
                 entry.modified_at,
                 entry.file_hash.clone(),
+                opts,
             )
             .await
             {
@@ -338,6 +340,8 @@ pub async fn handle_start_index(token: &str, data: Value, write: &mut WsWriter) 
         }
     };
 
+    let img_opts = image_processing::ProcessingOptions::from(&app_config.image_processing);
+
     let api_config = config_to_api_config(&app_config);
     log_info(&format!(
         "使用 provider={}, base_url={}, model={}",
@@ -437,11 +441,10 @@ pub async fn handle_start_index(token: &str, data: Value, write: &mut WsWriter) 
         }
     };
 
-    // 处理增量文件
     let proc_result = process_incremental_files(
         token, write, &client, &mut store,
         &incremental, current_step, total_steps as u32,
-        new_count, modified_count, deleted_count, &now,
+        new_count, modified_count, deleted_count, &now, &img_opts,
     )
     .await;
 
@@ -503,13 +506,12 @@ async fn process_image_file(
     file_size: u64,
     modified_at: u64,
     file_hash: String,
+    opts: &image_processing::ProcessingOptions,
 ) -> Result<Vec<crate::vector_store::VectorEntry>, String> {
-
-    let thumbnail_path = image_processing::generate_thumbnail(file_path, constants::DEFAULT_THUMBNAIL_SIZE).unwrap_or_default();
-
+    let thumbnail_path = image_processing::generate_thumbnail(file_path, opts.thumbnail_size).unwrap_or_default();
     let exif = image_processing::extract_exif(file_path).unwrap_or_default();
+    let base64 = image_processing::encode_base64(file_path, opts.embed_image_size)?;
 
-    let base64 = image_processing::resize_to_base64(file_path, constants::DEFAULT_EMBEDDING_RESIZE)?;
 
     let vector = client.embed_image(&base64).await?;
     log_info(&format!("向量维数: {}", vector.len()));

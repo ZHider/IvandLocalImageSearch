@@ -109,14 +109,16 @@ async fn main() {
         match msg {
             Ok(Message::Text(text)) => {
                 let text_str = text.to_string();
-                log_info(&format!("收到 WebSocket 消息: {}", text_str));
 
                 match serde_json::from_str::<IncomingMessage>(&text_str) {
                     Ok(incoming) => {
-                        log_info(&format!(
-                            "解析消息 -> event: {:?}, data: {:?}",
-                            incoming.event, incoming.data
-                        ));
+                        let is_window_event = matches!(
+                            incoming.event.as_deref(),
+                            Some("windowBlur") | Some("windowFocus")
+                        );
+                        if !is_window_event {
+                            log_info(&format!("收到事件: {:?}", incoming.event));
+                        }
 
                         if let Some(event) = incoming.event {
                             match event.as_str() {
@@ -179,6 +181,9 @@ async fn main() {
                                         &mut conn.write,
                                     )
                                     .await;
+                                }
+                                "windowBlur" | "windowFocus" => {
+                                    // NeutralinoJS 窗口事件，无需处理
                                 }
                                 other => {
                                     log_info(&format!("收到未知事件: {}", other));

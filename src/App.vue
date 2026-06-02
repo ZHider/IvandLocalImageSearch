@@ -5,7 +5,6 @@ import type { MenuOption } from 'naive-ui'
 
 const router = useRouter()
 const route = useRoute()
-
 const menuOptions: MenuOption[] = [
   {
     label: '🔍 搜索',
@@ -49,10 +48,6 @@ function handleMenuUpdate(key: string) {
     <n-layout class="app-layout">
       <n-layout-header bordered>
         <div class="header-bar">
-          <n-space align="center" :size="8">
-            <span class="app-logo">🔍</span>
-            <span class="app-title">本地智能图片搜索</span>
-          </n-space>
           <n-menu
             v-model:value="activeKey"
             :options="menuOptions"
@@ -64,7 +59,11 @@ function handleMenuUpdate(key: string) {
       </n-layout-header>
       <n-layout-content class="content">
         <n-message-provider>
-          <RouterView />
+          <RouterView v-slot="{ Component }">
+            <Transition name="fade" mode="out-in">
+              <component :is="Component" />
+            </Transition>
+          </RouterView>
         </n-message-provider>
       </n-layout-content>
     </n-layout>
@@ -104,5 +103,15 @@ function handleMenuUpdate(key: string) {
 .content {
   flex: 1;
   overflow: hidden;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.1s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>

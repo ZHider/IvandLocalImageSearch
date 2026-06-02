@@ -114,7 +114,7 @@ pub async fn handle_search(token: &str, data: Value, write: &mut WsWriter) {
                 .await;
                 return;
             }
-            let base64 = match image_processing::resize_to_base64(image_path, constants::DEFAULT_EMBEDDING_RESIZE) {
+            let base64 = match image_processing::encode_base64(image_path, constants::DEFAULT_EMBEDDING_RESIZE) {
                 Ok(b) => b,
                 Err(e) => {
                     log_error(&format!("图片预处理失败: {}", e));

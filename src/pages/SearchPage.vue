@@ -1,27 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { os } from '@neutralinojs/lib'
 import { useMessage } from 'naive-ui'
 import { useExtension } from '../composables/useExtension'
-
-interface SearchResult {
-  file_path: string
-  file_name: string
-  file_type: string
-  file_size: number
-  similarity: number
-  thumbnail_path: string
-  text_preview?: string
-  exif?: {
-    camera_make?: string
-    camera_model?: string
-    iso?: string
-    aperture?: string
-    shutter_speed?: string
-    focal_length?: string
-    date_taken?: string
-  }
-}
+import type { SearchResult } from '../types'
+import SearchBar from '../components/SearchBar.vue'
+import ResultCard from '../components/ResultCard.vue'
+import PreviewModal from '../components/PreviewModal.vue'
 
 const message = useMessage()
 const { send, on } = useExtension()
@@ -33,17 +17,6 @@ const results = ref<SearchResult[]>([])
 const previewImage = ref<string | null>(null)
 const previewLoading = ref(false)
 const previewItem = ref<SearchResult | null>(null)
-
-const showPreview = computed({
-  get: () => previewImage.value !== null,
-  set: (val: boolean) => {
-    if (!val) previewImage.value = null
-  },
-})
-
-const previewImgClass = computed(() =>
-  previewLoading.value ? 'preview-image preview-loading' : 'preview-image'
-)
 
 const containerRef = ref<HTMLElement | null>(null)
 const scrollTop = ref(0)
@@ -67,11 +40,8 @@ function onContainerScroll() {
 }
 
 const rowCount = computed(() => Math.ceil(results.value.length / COLUMNS.value))
-
 const totalHeight = computed(() => rowCount.value * (ITEM_HEIGHT + GAP) + GAP)
-
 const startRow = computed(() => Math.max(0, Math.floor(scrollTop.value / (ITEM_HEIGHT + GAP)) - 2))
-
 const endRow = computed(() =>
   Math.min(rowCount.value, Math.ceil((scrollTop.value + containerHeight.value) / (ITEM_HEIGHT + GAP)) + 2)
 )
@@ -105,108 +75,62 @@ onMounted(() => {
     containerHeight.value = containerRef.value.clientHeight
   }
 
-  on('searchResult', (data: unknown) => {
-    searching.value = false
-    const r = data as { results: SearchResult[]; total: number }
-    results.value = r.results || []
-    thumbnailCache.value = {}
-    if (r.total === 0) {
-      message.info('未找到匹配结果')
-    } else {
-      message.success(`找到 ${r.total} 个结果`)
-    }
-    nextTick(() => {
-      if (containerRef.value) {
-        containerRef.value.scrollTop = 0
+  const cleanups = [
+    on('searchResult', (data: unknown) => {
+      searching.value = false
+      const r = data as { results: SearchResult[]; total: number }
+      results.value = r.results || []
+      thumbnailCache.value = {}
+      if (r.total === 0) {
+        message.info('未找到匹配结果')
+      } else {
+        message.success(`找到 ${r.total} 个结果`)
       }
-    })
-  })
+      nextTick(() => {
+        if (containerRef.value) {
+          containerRef.value.scrollTop = 0
+        }
+      })
+    }),
 
-  on('searchError', (data: unknown) => {
-    searching.value = false
-    const err = data as { error?: string }
-    message.error(`搜索失败: ${err?.error || '未知错误'}`)
-  })
+    on('searchError', (data: unknown) => {
+      searching.value = false
+      const err = data as { error?: string }
+      message.error(`搜索失败: ${err?.error || '未知错误'}`)
+    }),
 
-  on('thumbnailReady', (data: unknown) => {
-    const d = data as { imagePath: string; thumbnailPath: string }
-    if (d.thumbnailPath) {
-      thumbnailCache.value[d.imagePath] = `file://${d.thumbnailPath.replace(/\\/g, '/')}`
-    }
-  })
+    on('thumbnailReady', (data: unknown) => {
+      const d = data as { imagePath: string; thumbnailPath: string }
+      if (d.thumbnailPath) {
+        thumbnailCache.value[d.imagePath] = `file://${d.thumbnailPath.replace(/\\/g, '/')}`
+      }
+    }),
 
-  on('thumbnailError', (data: unknown) => {
-    const d = data as { imagePath: string; error: string }
-    const filename = d.imagePath.split(/[\\/]/).pop() || d.imagePath
-    message.warning(`缩略图加载失败: ${filename} — ${d.error}`)
-  })
+    on('thumbnailError', (data: unknown) => {
+      const d = data as { imagePath: string; error: string }
+      const filename = d.imagePath.split(/[\\/]/).pop() || d.imagePath
+      message.warning(`缩略图加载失败: ${filename} — ${d.error}`)
+    }),
 
-  on('previewReady', (data: unknown) => {
-    const d = data as { imagePath: string; previewData: string }
-    if (d.previewData) {
-      previewImage.value = d.previewData
+    on('previewReady', (data: unknown) => {
+      const d = data as { imagePath: string; previewData: string }
+      if (d.previewData) {
+        previewImage.value = d.previewData
+        previewLoading.value = false
+      }
+    }),
+
+    on('previewError', (data: unknown) => {
+      const d = data as { imagePath: string; error: string }
       previewLoading.value = false
-    }
-  })
+      message.error(`加载预览失败: ${d.error}`)
+    }),
+  ]
 
-  on('previewError', (data: unknown) => {
-    const d = data as { imagePath: string; error: string }
-    previewLoading.value = false
-    message.error(`加载预览失败: ${d.error}`)
+  onUnmounted(() => {
+    cleanups.forEach(stop => stop())
   })
 })
-
-async function selectImage() {
-  try {
-    const selected = await os.showOpenDialog('选择图片', {
-      filters: [{ name: '图片', extensions: ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'] }],
-    })
-    if (selected && selected.length > 0) {
-      searchImagePath.value = selected[0]
-      searchText.value = ''
-    }
-  } catch (e) {
-    message.error(`选择图片失败: ${e}`)
-  }
-}
-
-function clearImage() {
-  searchImagePath.value = ''
-}
-
-// 拖拽支持
-function onDragOver(e: DragEvent) {
-  e.preventDefault()
-  if (e.dataTransfer) {
-    e.dataTransfer.dropEffect = 'copy'
-  }
-}
-
-function onDrop(e: DragEvent) {
-  e.preventDefault()
-  const files = e.dataTransfer?.files
-  if (!files || files.length === 0) return
-
-  const file = files[0]
-  const ext = file.name.split('.').pop()?.toLowerCase() || ''
-  const validExts = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp']
-  if (!validExts.includes(ext)) {
-    message.warning('请拖入图片文件 (jpg/png/gif/bmp/webp)')
-    return
-  }
-
-  // In Neutralino, we need the full path. The browser `file.name` only gives
-  // the basename + the browser stores a temporary path.  For real desktop
-  // drag we use the webview drag event.  Since Neutralino wraps a webview,
-  // `file.path` (Electron/Chromium extension) or the full path from the OS
-  // drag is available via `file.path` in Chromium.
-  // Fallback: use the OS dialog if the path isn't available.
-  const filePath = (file as any).path || file.name
-  if (filePath) {
-    searchImagePath.value = filePath
-    searchText.value = ''
-  }
-}
 
 function doSearch() {
   if (!searchText.value.trim() && !searchImagePath.value) {
@@ -230,16 +154,9 @@ function doSearch() {
   }
 }
 
-function doSearchOnEnter(e: KeyboardEvent) {
-  if (e.key === 'Enter') {
-    doSearch()
-  }
-}
-
 function openPreview(item: SearchResult) {
   previewItem.value = item
   previewLoading.value = true
-  // 立即显示已有缩略图
   const thumb = getThumbSrc(item.file_path, item.thumbnail_path)
   if (thumb) {
     previewImage.value = thumb
@@ -251,23 +168,6 @@ function closePreview() {
   previewImage.value = null
   previewItem.value = null
   previewLoading.value = false
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-  if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
-  return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB'
-}
-
-function formatSimilarity(sim: number): string {
-  return sim.toFixed(1) + '%'
-}
-
-function getSimilarityColor(sim: number): string {
-  if (sim >= 0.8) return '#18a058'
-  if (sim >= 0.6) return '#f0a020'
-  return '#666'
 }
 
 let thumbnailObs: IntersectionObserver | null = null
@@ -311,48 +211,13 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="search-container" @dragover="onDragOver" @drop="onDrop">
-    <n-card class="search-card">
-      <n-space vertical :size="16">
-        <n-space :size="12" align="center">
-          <n-input
-            v-model:value="searchText"
-            placeholder="输入搜索关键词..."
-            :disabled="searching || !!searchImagePath"
-            clearable
-            round
-            size="large"
-            style="flex: 1"
-            @keydown="doSearchOnEnter"
-          >
-          </n-input>
-
-          <n-button
-            @click="selectImage"
-            :disabled="searching"
-            size="large"
-            secondary
-          >
-            {{ searchImagePath ? '🖼️ 已选图片' : '🖼️ 以图搜图' }}
-          </n-button>
-
-          <n-button
-            type="primary"
-            size="large"
-            @click="doSearch"
-            :loading="searching"
-          >
-            搜索
-          </n-button>
-        </n-space>
-
-        <n-space v-if="searchImagePath" align="center">
-          <n-tag type="info" closable @close="clearImage">
-            📷 {{ searchImagePath.split(/[\\/]/).pop() }}
-          </n-tag>
-        </n-space>
-      </n-space>
-    </n-card>
+  <div class="search-container">
+    <SearchBar
+      v-model:search-text="searchText"
+      v-model:search-image-path="searchImagePath"
+      :searching="searching"
+      @search="doSearch"
+    />
 
     <div
       ref="containerRef"
@@ -361,48 +226,15 @@ onUnmounted(() => {
       :style="{ height: 'calc(100vh - 220px)' }"
     >
       <div v-if="results.length > 0" class="results-virtual" :style="{ height: totalHeight + 'px' }">
-          <div class="results-grid" :style="{ paddingTop: paddingTop + 'px', gridTemplateColumns: `repeat(${COLUMNS}, 1fr)` }">
-          <div
+        <div class="results-grid" :style="{ paddingTop: paddingTop + 'px', gridTemplateColumns: `repeat(${COLUMNS}, 1fr)` }">
+          <ResultCard
             v-for="item in visibleResults"
             :key="item._index"
-            class="result-card"
-            :style="{ height: ITEM_HEIGHT + 'px' }"
-          >
-            <div class="card-thumb" @click="openPreview(item)">
-              <img
-                v-if="getThumbSrc(item.file_path, item.thumbnail_path)"
-                :src="getThumbSrc(item.file_path, item.thumbnail_path)"
-                :data-file-path="item.file_path"
-                class="thumb-img"
-                loading="lazy"
-              />
-              <div v-else class="thumb-placeholder" :data-file-path="item.file_path">
-                <template v-if="item.file_type === 'text'">
-                  <span class="placeholder-icon">📄</span>
-                </template>
-                <template v-else>
-                  <span class="placeholder-icon">🖼️</span>
-                </template>
-              </div>
-              <div class="similarity-badge" :style="{ background: getSimilarityColor(item.similarity) }">
-                {{ formatSimilarity(item.similarity) }}
-              </div>
-            </div>
-            <div class="card-info">
-              <n-ellipsis class="card-name" :tooltip="false">
-                {{ item.file_name }}
-              </n-ellipsis>
-              <div class="card-meta">
-                <n-tag :type="item.file_type === 'image' ? 'success' : 'info'" size="small" :bordered="false">
-                  {{ item.file_type === 'image' ? '📷' : '📝' }}
-                </n-tag>
-                <span class="card-size">{{ formatSize(item.file_size) }}</span>
-              </div>
-              <n-ellipsis v-if="item.text_preview" class="card-preview" :line-clamp="2" :tooltip="false">
-                {{ item.text_preview }}
-              </n-ellipsis>
-            </div>
-          </div>
+            :item="item"
+            :thumbnail-src="getThumbSrc(item.file_path, item.thumbnail_path)"
+            :item-height="ITEM_HEIGHT"
+            @preview="openPreview(item)"
+          />
         </div>
       </div>
 
@@ -413,66 +245,13 @@ onUnmounted(() => {
       />
     </div>
 
-    <n-modal
-      v-model:show="showPreview"
-      preset="card"
-      title="图片预览"
-      style="max-width: 90vw; max-height: 90vh; overflow-y: auto;"
-      :on-close="closePreview"
-      :mask-closable="true"
-    >
-      <div v-if="previewImage" class="preview-image-wrap">
-        <div class="preview-img-container">
-          <img :src="previewImage" :class="previewImgClass" />
-          <div v-if="previewLoading" class="preview-loader">加载中…</div>
-        </div>
-      </div>
-      <div v-if="previewItem" class="preview-meta">
-        <div class="meta-row">
-          <span class="meta-label">文件名</span>
-          <span class="meta-value">{{ previewItem.file_name }}</span>
-        </div>
-        <div class="meta-row">
-          <span class="meta-label">路径</span>
-          <span class="meta-value meta-path">{{ previewItem.file_path }}</span>
-        </div>
-        <div class="meta-row">
-          <span class="meta-label">文件大小</span>
-          <span class="meta-value">{{ formatSize(previewItem.file_size) }}</span>
-        </div>
-        <div class="meta-row">
-          <span class="meta-label">相似度</span>
-          <span class="meta-value" :style="{ color: getSimilarityColor(previewItem.similarity) }">
-            {{ formatSimilarity(previewItem.similarity) }}
-          </span>
-        </div>
-        <div v-if="previewItem.exif" class="meta-divider">EXIF 信息</div>
-        <div v-if="previewItem.exif && previewItem.exif.date_taken" class="meta-row">
-          <span class="meta-label">拍摄时间</span>
-          <span class="meta-value">{{ previewItem.exif.date_taken }}</span>
-        </div>
-        <div v-if="(previewItem.exif && previewItem.exif.camera_make) || (previewItem.exif && previewItem.exif.camera_model)" class="meta-row">
-          <span class="meta-label">相机</span>
-          <span class="meta-value">{{ [previewItem.exif.camera_make, previewItem.exif.camera_model].filter(Boolean).join(' ') }}</span>
-        </div>
-        <div v-if="previewItem.exif && previewItem.exif.iso" class="meta-row">
-          <span class="meta-label">ISO</span>
-          <span class="meta-value">{{ previewItem.exif.iso }}</span>
-        </div>
-        <div v-if="previewItem.exif && previewItem.exif.aperture" class="meta-row">
-          <span class="meta-label">光圈</span>
-          <span class="meta-value">{{ previewItem.exif.aperture }}</span>
-        </div>
-        <div v-if="previewItem.exif && previewItem.exif.shutter_speed" class="meta-row">
-          <span class="meta-label">快门速度</span>
-          <span class="meta-value">{{ previewItem.exif.shutter_speed }}</span>
-        </div>
-        <div v-if="previewItem.exif && previewItem.exif.focal_length" class="meta-row">
-          <span class="meta-label">焦距</span>
-          <span class="meta-value">{{ previewItem.exif.focal_length }}</span>
-        </div>
-      </div>
-    </n-modal>
+    <PreviewModal
+      :show="previewImage !== null"
+      :preview-image="previewImage"
+      :preview-loading="previewLoading"
+      :preview-item="previewItem"
+      @close="closePreview"
+    />
   </div>
 </template>
 
@@ -483,10 +262,6 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-
-.search-card {
-  flex-shrink: 0;
 }
 
 .results-scroll {
@@ -508,168 +283,7 @@ onUnmounted(() => {
   padding: 12px;
 }
 
-.result-card {
-  background: #fff;
-  border-radius: 8px;
-  overflow: hidden;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.result-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.13);
-}
-
-.card-thumb {
-  position: relative;
-  width: 100%;
-  height: 160px;
-  overflow: hidden;
-  background: #f0f0f0;
-  flex-shrink: 0;
-}
-
-.thumb-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.thumb-placeholder {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, #e8e8e8, #f5f5f5);
-}
-
-.placeholder-icon {
-  font-size: 48px;
-  opacity: 0.5;
-}
-
-.similarity-badge {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  color: #fff;
-  font-size: 12px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: 10px;
-}
-
-.card-info {
-  padding: 8px 10px;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  overflow: hidden;
-}
-
-.card-name {
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1.3;
-}
-
-.card-meta {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.card-size {
-  font-size: 12px;
-  color: #999;
-}
-
-.card-preview {
-  font-size: 12px;
-  color: #888;
-  line-height: 1.4;
-  margin-top: 2px;
-}
-
 .search-empty {
   margin-top: 80px;
-}
-
-.preview-image {
-  width: 100%;
-  max-height: 70vh;
-  object-fit: contain;
-  border-radius: 4px;
-  transition: opacity 0.3s;
-}
-
-.preview-loading {
-  object-fit: fill;
-  opacity: 0.6;
-  filter: blur(2px);
-}
-
-.preview-image-wrap {
-  text-align: center;
-}
-
-.preview-img-container {
-  position: relative;
-  display: inline-block;
-  width: 100%;
-}
-
-.preview-loader {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 255, 255, 0.5);
-  z-index: 1;
-}
-
-.preview-meta {
-  border-top: 1px solid #eee;
-  padding-top: 12px;
-  font-size: 13px;
-}
-
-.meta-row {
-  display: flex;
-  padding: 4px 0;
-  gap: 12px;
-  align-items: baseline;
-}
-
-.meta-label {
-  min-width: 72px;
-  color: #999;
-  flex-shrink: 0;
-}
-
-.meta-value {
-  color: #333;
-  word-break: break-all;
-}
-
-.meta-path {
-  font-size: 12px;
-  color: #666;
-}
-
-.meta-divider {
-  font-size: 12px;
-  color: #999;
-  margin: 8px 0 4px;
-  font-weight: 500;
-  border-bottom: 1px solid #eee;
-  padding-bottom: 4px;
 }
 </style>

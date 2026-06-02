@@ -1,4 +1,4 @@
-import { ref, type Ref } from 'vue'
+import { ref, onMounted, onUnmounted, type Ref } from 'vue'
 import { useMessage } from 'naive-ui'
 import { useExtension } from './useExtension'
 import type { AppConfig, ApiTestResult } from '../types'
@@ -9,6 +9,32 @@ export function useApiTest(config: Ref<AppConfig>) {
 
   const testing = ref(false)
   const testResult = ref<ApiTestResult | null>(null)
+  const availableModels = ref<string[]>([])
+
+  const cleanups: (() => void)[] = []
+
+  onMounted(() => {
+    cleanups.push(
+      on('apiConnectionResult', (data: unknown) => {
+        testing.value = false
+        const result = data as ApiTestResult
+        testResult.value = result
+        if (result.models && result.models.length > 0) {
+          availableModels.value = result.models
+        }
+        if (result.success) {
+          message.success('连接成功 ✅')
+        } else {
+          message.error(`连接失败: ${result.message}`)
+        }
+      })
+    )
+  })
+
+  onUnmounted(() => {
+    cleanups.forEach(stop => stop())
+    cleanups.length = 0
+  })
 
   function testConnection() {
     testing.value = true
@@ -26,24 +52,10 @@ export function useApiTest(config: Ref<AppConfig>) {
     })
   }
 
-  function setupEvents() {
-    on('apiConnectionResult', (data: unknown) => {
-      testing.value = false
-      const result = data as ApiTestResult
-      testResult.value = result
-      if (result.success) {
-        message.success('连接成功 ✅')
-      } else {
-        message.error(`连接失败: ${result.message}`)
-      }
-    })
-  }
-
-  setupEvents()
-
   return {
     testing,
     testResult,
     testConnection,
+    availableModels,
   }
 }
