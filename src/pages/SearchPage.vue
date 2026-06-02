@@ -137,7 +137,8 @@ onMounted(() => {
 
   on('thumbnailError', (data: unknown) => {
     const d = data as { imagePath: string; error: string }
-    console.warn(`缩略图生成失败: ${d.imagePath}`, d.error)
+    const filename = d.imagePath.split(/[\\/]/).pop() || d.imagePath
+    message.warning(`缩略图加载失败: ${filename} — ${d.error}`)
   })
 
   on('previewReady', (data: unknown) => {
@@ -164,8 +165,8 @@ async function selectImage() {
       searchImagePath.value = selected[0]
       searchText.value = ''
     }
-  } catch {
-    message.error('选择图片失败')
+  } catch (e) {
+    message.error(`选择图片失败: ${e}`)
   }
 }
 

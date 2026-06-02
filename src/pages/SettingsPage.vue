@@ -29,8 +29,12 @@ async function saveConfig() {
   try {
     await formRef.value?.validate()
     doSave()
-  } catch {
-    message.error('请完善必填项')
+  } catch (errors) {
+    const fields = (errors as Array<{ field?: string }>)
+      ?.map((e) => e.field)
+      .filter(Boolean)
+      .join(', ') || '表单'
+    message.error(`请完善必填项: ${fields}`)
   }
 }
 
@@ -38,8 +42,12 @@ async function testConnection() {
   try {
     await formRef.value?.validate()
     doTest()
-  } catch {
-    message.error('请完善必填项')
+  } catch (errors) {
+    const fields = (errors as Array<{ field?: string }>)
+      ?.map((e) => e.field)
+      .filter(Boolean)
+      .join(', ') || '表单'
+    message.error(`请完善必填项: ${fields}`)
   }
 }
 </script>

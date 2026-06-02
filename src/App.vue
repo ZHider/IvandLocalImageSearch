@@ -1,18 +1,12 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
-import { server, filesystem } from '@neutralinojs/lib'
 import type { MenuOption } from 'naive-ui'
-import { useConfig } from './composables/useConfig'
 
 const router = useRouter()
 const route = useRoute()
 
 const menuOptions: MenuOption[] = [
-  {
-    label: '🏠 首页',
-    key: 'home',
-  },
   {
     label: '🔍 搜索',
     key: 'search',
@@ -32,9 +26,7 @@ const activeKey = ref<string>('search')
 watch(
   () => route.path,
   (path) => {
-    if (path === '/home') {
-      activeKey.value = 'home'
-    } else if (path.startsWith('/search')) {
+    if (path.startsWith('/search')) {
       activeKey.value = 'search'
     } else if (path.startsWith('/index')) {
       activeKey.value = 'index'
@@ -50,25 +42,6 @@ watch(
 function handleMenuUpdate(key: string) {
   router.push(`/${key}`)
 }
-
-const { load: loadConfig } = useConfig()
-loadConfig()
-
-onMounted(async () => {
-  if (typeof window !== 'undefined' && window.NL_PORT) {
-    const thumbDir = window.NL_PATH + '/data/thumbnails'
-    try {
-      await filesystem.createDirectory(thumbDir)
-    } catch {
-      // 目录已存在，忽略
-    }
-    try {
-      await server.mount('/thumbnails', thumbDir)
-    } catch (e) {
-      console.warn('挂载缩略图目录失败:', e)
-    }
-  }
-})
 </script>
 
 <template>
@@ -76,6 +49,10 @@ onMounted(async () => {
     <n-layout class="app-layout">
       <n-layout-header bordered>
         <div class="header-bar">
+          <n-space align="center" :size="8">
+            <span class="app-logo">🔍</span>
+            <span class="app-title">本地智能图片搜索</span>
+          </n-space>
           <n-menu
             v-model:value="activeKey"
             :options="menuOptions"
@@ -87,22 +64,18 @@ onMounted(async () => {
       </n-layout-header>
       <n-layout-content class="content">
         <n-message-provider>
-          <RouterView v-slot="{ Component }">
-            <Transition name="page" mode="out-in">
-              <component :is="Component" />
-            </Transition>
-          </RouterView>
+          <RouterView />
         </n-message-provider>
       </n-layout-content>
     </n-layout>
   </n-config-provider>
 </template>
+
 <style scoped>
 .app-layout {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  overflow: clip;
 }
 
 .header-bar {
@@ -114,26 +87,18 @@ onMounted(async () => {
   max-width: 100%;
 }
 
+.app-logo {
+  font-size: 24px;
+}
+
+.app-title {
+  font-size: 16px;
+  font-weight: 600;
+  white-space: nowrap;
+}
 
 .nav-menu {
   flex-shrink: 0;
-}
-/* ---- 页面切换动画 ---- */
-.page-enter-active,
-.page-leave-active {
-  transition: opacity 0.12s ease;
-}
-.page-enter-from,
-.page-leave-to {
-  opacity: 0;
-}
-
-/* ---- 导航栏悬浮动画 ---- */
-.nav-menu :deep(.n-menu-item) {
-  transition: transform 0.1s ease;
-}
-.nav-menu :deep(.n-menu-item:hover) {
-  transform: translateY(-1px);
 }
 
 .content {

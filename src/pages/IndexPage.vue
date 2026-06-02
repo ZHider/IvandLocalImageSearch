@@ -110,8 +110,8 @@ async function addFolder() {
       }
       saveFolders()
     }
-  } catch {
-    message.error('选择文件失败')
+  } catch (e) {
+    message.error(`选择文件失败: ${e}`)
   } finally {
     addFolderDisabled.value = false
   }

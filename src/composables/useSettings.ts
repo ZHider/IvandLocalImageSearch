@@ -17,7 +17,6 @@ export const API_TYPE_OPTIONS: ApiTypeOption[] = [
 export const FORM_RULES: FormRules = {
   apiType: { required: true, message: '请选择 API 类型', trigger: 'change' },
   endpoint: { required: true, message: '请输入 Endpoint 地址', trigger: 'blur' },
-  modelName: { required: true, message: '请输入模型名称', trigger: 'blur' },
   customProviderName: { required: true, message: '请输入自定义提供商名称', trigger: 'blur' },
   customEmbeddingPath: { required: true, message: '请输入 Embedding 路径', trigger: 'blur' },
 }
