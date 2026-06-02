@@ -5,7 +5,6 @@ use crate::file_utils;
 pub struct IndexMeta {
     pub file_path: String,
     pub file_hash: String,
-    #[allow(dead_code)]
     pub indexed_at: String,
 }
 pub fn get_db_path() -> PathBuf {
@@ -67,6 +66,48 @@ pub fn clear_all() -> Result<()> {
     Ok(())
 }
 
+// ---- SQL WHERE 条件构建辅助函数 ----
+
+/// 构建筛选条件的 WHERE 子句和参数
+struct WhereClause {
+    sql: String,
+    params: Vec<String>,
+}
+
+fn build_where_clause(
+    path_filter: Option<&str>,
+    time_after: Option<&str>,
+    time_before: Option<&str>,
+) -> WhereClause {
+    let mut sql = String::from("WHERE 1=1");
+    let mut params = Vec::new();
+
+    if let Some(f) = path_filter {
+        if !f.is_empty() {
+            sql.push_str(" AND file_path LIKE ?");
+            params.push(format!("%{}%", f));
+        }
+    }
+    if let Some(t) = time_after {
+        if !t.is_empty() {
+            sql.push_str(" AND indexed_at >= ?");
+            params.push(t.to_string());
+        }
+    }
+    if let Some(t) = time_before {
+        if !t.is_empty() {
+            sql.push_str(" AND indexed_at <= ?");
+            params.push(t.to_string());
+        }
+    }
+
+    WhereClause { sql, params }
+}
+
+fn to_sql_refs(params: &[String]) -> Vec<&dyn rusqlite::types::ToSql> {
+    params.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect()
+}
+
 /// 按可选条件查询元数据。
 pub fn query_meta(
     path_filter: Option<&str>,
@@ -76,27 +117,9 @@ pub fn query_meta(
     offset: Option<u32>,
 ) -> Result<Vec<IndexMeta>> {
     let conn = open_db()?;
-    let mut sql = String::from("SELECT file_path, file_hash, indexed_at FROM index_meta WHERE 1=1");
-    let mut param_values: Vec<String> = Vec::new();
-
-    if let Some(f) = path_filter {
-        if !f.is_empty() {
-            sql.push_str(" AND file_path LIKE ?");
-            param_values.push(format!("%{}%", f));
-        }
-    }
-    if let Some(t) = time_after {
-        if !t.is_empty() {
-            sql.push_str(" AND indexed_at >= ?");
-            param_values.push(t.to_string());
-        }
-    }
-    if let Some(t) = time_before {
-        if !t.is_empty() {
-            sql.push_str(" AND indexed_at <= ?");
-            param_values.push(t.to_string());
-        }
-    }
+    let where_clause = build_where_clause(path_filter, time_after, time_before);
+    
+    let mut sql = format!("SELECT file_path, file_hash, indexed_at FROM index_meta {}", where_clause.sql);
     sql.push_str(" ORDER BY indexed_at DESC");
 
     if let Some(l) = limit {
@@ -106,8 +129,7 @@ pub fn query_meta(
         sql.push_str(&format!(" OFFSET {}", o));
     }
 
-    let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-        param_values.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+    let params_refs = to_sql_refs(&where_clause.params);
 
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params_refs.as_slice(), |row| {
@@ -132,30 +154,10 @@ pub fn count_meta(
     time_before: Option<&str>,
 ) -> Result<i64> {
     let conn = open_db()?;
-    let mut sql = String::from("SELECT COUNT(*) FROM index_meta WHERE 1=1");
-    let mut param_values: Vec<String> = Vec::new();
-
-    if let Some(f) = path_filter {
-        if !f.is_empty() {
-            sql.push_str(" AND file_path LIKE ?");
-            param_values.push(format!("%{}%", f));
-        }
-    }
-    if let Some(t) = time_after {
-        if !t.is_empty() {
-            sql.push_str(" AND indexed_at >= ?");
-            param_values.push(t.to_string());
-        }
-    }
-    if let Some(t) = time_before {
-        if !t.is_empty() {
-            sql.push_str(" AND indexed_at <= ?");
-            param_values.push(t.to_string());
-        }
-    }
-
-    let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-        param_values.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+    let where_clause = build_where_clause(path_filter, time_after, time_before);
+    
+    let sql = format!("SELECT COUNT(*) FROM index_meta {}", where_clause.sql);
+    let params_refs = to_sql_refs(&where_clause.params);
 
     let count: i64 = conn.query_row(&sql, params_refs.as_slice(), |row| row.get(0))?;
     Ok(count)

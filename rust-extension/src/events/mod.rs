@@ -28,12 +28,6 @@ pub struct ProcessInput {
     pub nl_extension_id: String,
 }
 
-#[derive(Deserialize)]
-pub struct IncomingMessage {
-    pub event: Option<String>,
-    pub data: Option<Value>,
-}
-
 // ---- ping ----
 
 pub async fn handle_ping(token: &str, data: Value, write: &mut WsWriter) {

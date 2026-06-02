@@ -34,10 +34,6 @@ impl Default for ProcessingOptions {
     }
 }
 
-// ============================================================================
-// 解码层：统一打开所有图片格式（含 HEIC）
-// ============================================================================
-
 /// 打开图片文件，支持标准格式 + HEIC/HEIF。
 /// 标准格式走 `image::open()`，HEIC/HEIF 走纯 Rust `heic` 解码器。
 pub(crate) fn open_image(path: &str) -> Result<DynamicImage, String> {
@@ -69,8 +65,8 @@ fn decode_heic(path: &str) -> Result<DynamicImage, String> {
         .map(DynamicImage::ImageRgba8)
         .ok_or_else(|| "HEIC 解码结果转换为 RgbaImage 失败".to_string())
 }
-// HEIC → WebP 缓存（embedding 用）
-// ============================================================================
+
+// ---- HEIC → WebP 缓存（embedding 用） ----
 
 fn get_images_dir() -> std::path::PathBuf {
     file_utils::get_data_dir().join("images")
@@ -82,9 +78,7 @@ fn ensure_images_dir() -> Result<(), String> {
 }
 
 
-// ============================================================================
-// EXIF 类型
-// ============================================================================
+// ---- EXIF 类型 ----
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct ExifInfo {
     pub camera_make: Option<String>,
@@ -97,12 +91,8 @@ pub struct ExifInfo {
     pub gps_latitude: Option<String>,
     pub gps_longitude: Option<String>,
 }
-// ============================================================================
-// 缩放层：等比例尺寸计算
-// ============================================================================
 
-
-
+// ---- 缩放层：等比例尺寸计算 ----
 
 /// 等比例缩放使长边不超过 `max_size`，返回至少 1x1
 fn fit_dimensions(width: u32, height: u32, max_size: u32) -> (u32, u32) {
@@ -118,9 +108,7 @@ fn fit_dimensions(width: u32, height: u32, max_size: u32) -> (u32, u32) {
     }
 }
 
-// ============================================================================
-// EXIF 提取层（纯 Rust，支持 HEIC / JPEG 等）
-// ============================================================================
+// ---- EXIF 提取层（纯 Rust，支持 HEIC / JPEG 等） ----
 
 pub fn extract_exif(path: &str) -> Result<ExifInfo, String> {
     let exif_iter = match nom_exif::read_exif_iter(path) {
@@ -158,9 +146,7 @@ pub fn extract_exif(path: &str) -> Result<ExifInfo, String> {
     Ok(info)
 }
 
-// ============================================================================
-// 编码层（从已解码图片生成缩略图 / WebP 缓存）
-// ============================================================================
+// ---- 编码层（从已解码图片生成缩略图 / WebP 缓存） ----
 
 /// 从已解码的 `DynamicImage` 生成缩略图（跳过重复解码），缓存到 `data/thumbnails/`。
 pub(crate) fn generate_thumbnail_from_img(
@@ -208,9 +194,7 @@ pub(crate) fn convert_img_to_webp(
     Ok(webp_path.to_string_lossy().to_string())
 }
 
-// ============================================================================
-// 编码层（从文件路径 → 公开 API）
-// ============================================================================
+// ---- 编码层（从文件路径 → 公开 API） ----
 
 pub fn generate_thumbnail(path: &str, size: u32) -> Result<String, String> {
     file_utils::ensure_thumbnails_dir()?;

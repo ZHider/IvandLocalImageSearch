@@ -7,10 +7,10 @@ use serde_json::Value;
 
 use crate::config;
 use crate::constants;
-use crate::embedding::create_client;
+use crate::embedding::{self, create_client};
 use crate::log_error;
 use crate::log_info;
-use crate::vector_store::VectorStore;
+use crate::vector_store::{self, VectorStore};
 use crate::ws_client::{self, WsWriter};
 
 use super::config_to_api_config;
@@ -24,56 +24,16 @@ struct SearchQuery {
     image_path: Option<String>,
 }
 
-pub async fn handle_search(token: &str, data: Value, write: &mut WsWriter) {
-    log_info("处理 search 事件");
+// ---- 搜索管道：阶段化处理 ----
 
-    let query: SearchQuery = match serde_json::from_value(data) {
-        Ok(q) => q,
-        Err(e) => {
-            log_error(&format!("解析 search 数据失败: {}", e));
-            let _ = ws_client::send_broadcast(
-                token,
-                "searchError",
-                serde_json::json!({ "error": e.to_string() }),
-                write,
-            )
-            .await;
-            return;
-        }
-    };
-
-    let app_config = match config::load_config_from_file() {
-        Ok(c) => c,
-        Err(e) => {
-            log_error(&format!("加载配置失败: {}", e));
-            let _ = ws_client::send_broadcast(
-                token,
-                "searchError",
-                serde_json::json!({ "error": format!("请先配置 API: {}", e) }),
-                write,
-            )
-            .await;
-            return;
-        }
-    };
-
-    let api_config = config_to_api_config(&app_config);
-    let client = match create_client(&api_config) {
-        Ok(c) => c,
-        Err(e) => {
-            log_error(&format!("创建 embedding 客户端失败: {}", e));
-            let _ = ws_client::send_broadcast(
-                token,
-                "searchError",
-                serde_json::json!({ "error": e }),
-                write,
-            )
-            .await;
-            return;
-        }
-    };
-
-    let query_vector: Vec<f32> = match query.query_type.as_str() {
+/// 阶段 1：生成查询向量
+async fn generate_query_vector(
+    client: &embedding::ApiClient,
+    query: &SearchQuery,
+    token: &str,
+    write: &mut WsWriter,
+) -> Option<Vec<f32>> {
+    match query.query_type.as_str() {
         "text" => {
             let text = query.text.as_deref().unwrap_or("");
             if text.is_empty() {
@@ -84,10 +44,10 @@ pub async fn handle_search(token: &str, data: Value, write: &mut WsWriter) {
                     write,
                 )
                 .await;
-                return;
+                return None;
             }
             match client.embed_text(text).await {
-                Ok(v) => v,
+                Ok(v) => Some(v),
                 Err(e) => {
                     log_error(&format!("文本 embedding 失败: {}", e));
                     let _ = ws_client::send_broadcast(
@@ -97,7 +57,7 @@ pub async fn handle_search(token: &str, data: Value, write: &mut WsWriter) {
                         write,
                     )
                     .await;
-                    return;
+                    None
                 }
             }
         }
@@ -111,10 +71,10 @@ pub async fn handle_search(token: &str, data: Value, write: &mut WsWriter) {
                     write,
                 )
                 .await;
-                return;
+                return None;
             }
             match client.embed_image(image_path).await {
-                Ok(v) => v,
+                Ok(v) => Some(v),
                 Err(e) => {
                     log_error(&format!("图片 embedding 失败: {}", e));
                     let _ = ws_client::send_broadcast(
@@ -124,7 +84,7 @@ pub async fn handle_search(token: &str, data: Value, write: &mut WsWriter) {
                         write,
                     )
                     .await;
-                    return;
+                    None
                 }
             }
         }
@@ -137,26 +97,18 @@ pub async fn handle_search(token: &str, data: Value, write: &mut WsWriter) {
                 write,
             )
             .await;
-            return;
+            None
         }
-    };
+    }
+}
 
-
-    let store = match VectorStore::init().await {
-        Ok(s) => s,
-        Err(e) => {
-            log_error(&format!("初始化向量存储失败: {}", e));
-            let _ = ws_client::send_broadcast(
-                token,
-                "searchError",
-                serde_json::json!({ "error": e }),
-                write,
-            )
-            .await;
-            return;
-        }
-    };
-
+/// 阶段 2：执行向量搜索
+async fn perform_search(
+    store: &VectorStore,
+    query_vector: &[f32],
+    token: &str,
+    write: &mut WsWriter,
+) -> Option<Vec<vector_store::SearchResult>> {
     let count = store.count().await.unwrap_or(0);
     if count == 0 {
         log_info("向量存储为空");
@@ -167,12 +119,12 @@ pub async fn handle_search(token: &str, data: Value, write: &mut WsWriter) {
             write,
         )
         .await;
-        return;
+        return None;
     }
 
     let top_k = constants::DEFAULT_TOP_K;
-    let raw_results = match store.search(&query_vector, top_k).await {
-        Ok(r) => r,
+    match store.search(query_vector, top_k).await {
+        Ok(r) => Some(r),
         Err(e) => {
             log_error(&format!("向量搜索失败: {}", e));
             let _ = ws_client::send_broadcast(
@@ -182,13 +134,13 @@ pub async fn handle_search(token: &str, data: Value, write: &mut WsWriter) {
                 write,
             )
             .await;
-            return;
+            None
         }
-    };
+    }
+}
 
-    log_info(&format!("搜索返回 {} 个原始结果", raw_results.len()));
-
-    // 按文件路径去重，保留每个文件最高分
+/// 阶段 3：去重（按文件路径保留最高分）
+fn deduplicate_results(raw_results: &[vector_store::SearchResult]) -> Vec<&vector_store::SearchResult> {
     let mut best_idx: HashMap<String, usize> = HashMap::new();
     for (i, sr) in raw_results.iter().enumerate() {
         let fp = sr.entry.metadata["file_path"]
@@ -210,7 +162,7 @@ pub async fn handle_search(token: &str, data: Value, write: &mut WsWriter) {
         }
     }
 
-    let mut deduped: Vec<&crate::vector_store::SearchResult> = best_idx
+    let mut deduped: Vec<&vector_store::SearchResult> = best_idx
         .into_values()
         .map(|i| &raw_results[i])
         .collect();
@@ -220,9 +172,12 @@ pub async fn handle_search(token: &str, data: Value, write: &mut WsWriter) {
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    log_info(&format!("去重后 {} 个结果", deduped.len()));
+    deduped
+}
 
-    let results: Vec<serde_json::Value> = deduped
+/// 阶段 4：格式化搜索结果
+fn format_search_result(deduped: &[&vector_store::SearchResult]) -> Vec<serde_json::Value> {
+    deduped
         .iter()
         .map(|sr| {
             let meta = &sr.entry.metadata;
@@ -253,8 +208,72 @@ pub async fn handle_search(token: &str, data: Value, write: &mut WsWriter) {
 
             item
         })
-        .collect();
+        .collect()
+}
 
+pub async fn handle_search(token: &str, data: Value, write: &mut WsWriter) {
+    log_info("处理 search 事件");
+
+    // 解析搜索查询
+    let query: SearchQuery = match serde_json::from_value(data) {
+        Ok(q) => q,
+        Err(e) => {
+            log_error(&format!("解析 search 数据失败: {}", e));
+            let _ = ws_client::send_broadcast(
+                token,
+                "searchError",
+                serde_json::json!({ "error": e.to_string() }),
+                write,
+            )
+            .await;
+            return;
+        }
+    };
+
+    // 加载配置并创建客户端
+    let client = match create_search_client(token, write).await {
+        Some(c) => c,
+        None => return,
+    };
+
+    // 阶段 1：生成查询向量
+    let query_vector = match generate_query_vector(&client, &query, token, write).await {
+        Some(v) => v,
+        None => return,
+    };
+
+    // 初始化向量存储
+    let store = match VectorStore::init().await {
+        Ok(s) => s,
+        Err(e) => {
+            log_error(&format!("初始化向量存储失败: {}", e));
+            let _ = ws_client::send_broadcast(
+                token,
+                "searchError",
+                serde_json::json!({ "error": e }),
+                write,
+            )
+            .await;
+            return;
+        }
+    };
+
+    // 阶段 2：执行向量搜索
+    let raw_results = match perform_search(&store, &query_vector, token, write).await {
+        Some(r) => r,
+        None => return,
+    };
+
+    log_info(&format!("搜索返回 {} 个原始结果", raw_results.len()));
+
+    // 阶段 3：去重
+    let deduped = deduplicate_results(&raw_results);
+    log_info(&format!("去重后 {} 个结果", deduped.len()));
+
+    // 阶段 4：格式化结果
+    let results = format_search_result(&deduped);
+
+    // 发送搜索结果
     let _ = ws_client::send_broadcast(
         token,
         "searchResult",
@@ -267,4 +286,42 @@ pub async fn handle_search(token: &str, data: Value, write: &mut WsWriter) {
     .await;
 
     log_info(&format!("搜索完成，返回 {} 个去重结果", results.len()));
+}
+
+// ---- 辅助函数：创建搜索客户端 ----
+
+async fn create_search_client(
+    token: &str,
+    write: &mut WsWriter,
+) -> Option<embedding::ApiClient> {
+    let app_config = match config::load_config_from_file() {
+        Ok(c) => c,
+        Err(e) => {
+            log_error(&format!("加载配置失败: {}", e));
+            let _ = ws_client::send_broadcast(
+                token,
+                "searchError",
+                serde_json::json!({ "error": format!("请先配置 API: {}", e) }),
+                write,
+            )
+            .await;
+            return None;
+        }
+    };
+
+    let api_config = config_to_api_config(&app_config);
+    match create_client(&api_config) {
+        Ok(c) => Some(c),
+        Err(e) => {
+            log_error(&format!("创建 embedding 客户端失败: {}", e));
+            let _ = ws_client::send_broadcast(
+                token,
+                "searchError",
+                serde_json::json!({ "error": e }),
+                write,
+            )
+            .await;
+            None
+        }
+    }
 }

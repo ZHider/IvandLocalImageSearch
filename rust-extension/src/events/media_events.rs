@@ -127,7 +127,7 @@ pub async fn handle_get_preview(token: &str, data: Value, write: &mut WsWriter) 
                         // 保存落盘
                         if let Some(h) = &hash {
                             let _ = image_processing::convert_img_to_webp(
-                                &img, h, constants::DEFAULT_EMBEDDING_RESIZE, 90.0,
+                                &img, h, constants::DEFAULT_EMBEDDING_RESIZE, constants::HEIC_TO_WEBP_QUALITY,
                             );
                         }
                         // 从缓存文件读取（或内存兜底）

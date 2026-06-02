@@ -1,5 +1,6 @@
 mod config;
 mod constants;
+mod event_dispatcher;
 mod file_utils;
 mod embedding;
 mod events;
@@ -14,9 +15,8 @@ mod ws_client;
 use std::time::SystemTime;
 use std::io::Read;
 
-use events::{IncomingMessage, ProcessInput};
-use futures_util::StreamExt;
-use tokio_tungstenite::tungstenite::Message;
+use events::ProcessInput;
+use event_dispatcher::EventDispatcher;
 
 fn log(level: &str, msg: &str) {
     let now = SystemTime::now()
@@ -44,39 +44,9 @@ async fn main() {
         std::env::args().collect::<Vec<_>>()
     ));
 
-    log_info("开始读取 stdin...");
-    let mut stdin = String::new();
-    match std::io::stdin().read_to_string(&mut stdin) {
-        Ok(bytes) => {
-            log_info(&format!("stdin 读取成功，共 {} 字节", bytes));
-            log_info(&format!("stdin 原始内容: {}", &stdin));
-        }
-        Err(e) => {
-            log_error(&format!("无法读取 stdin: {}", e));
-            std::process::exit(1);
-        }
-    }
-
-    let input: ProcessInput = match serde_json::from_str::<ProcessInput>(&stdin) {
-        Ok(parsed) => {
-            log_info("stdin JSON 解析成功");
-            log_info(&format!("  nlPort:         {}", parsed.nl_port));
-            log_info(&format!(
-                "  nlToken:        {}...",
-                &parsed.nl_token[..8.min(parsed.nl_token.len())]
-            ));
-            log_info(&format!(
-                "  nlConnectToken: {}...",
-                &parsed.nl_connect_token[..8.min(parsed.nl_connect_token.len())]
-            ));
-            log_info(&format!("  nlExtensionId:  {}", parsed.nl_extension_id));
-            parsed
-        }
-        Err(e) => {
-            log_error(&format!("无法解析 stdin JSON: {}", e));
-            log_error(&format!("原始内容: {}", stdin));
-            std::process::exit(1);
-        }
+    let input = match read_and_parse_input() {
+        Some(parsed) => parsed,
+        None => std::process::exit(1),
     };
 
     let mut conn = match ws_client::connect_to_neutralino(
@@ -103,159 +73,43 @@ async fn main() {
     .await;
     log_info("extensionReady 事件发送成功");
 
-    log_info("进入事件循环，等待前端消息...");
+    EventDispatcher::run(&conn.token, conn.read, &mut conn.write).await;
+}
 
-    while let Some(msg) = conn.read.next().await {
-        match msg {
-            Ok(Message::Text(text)) => {
-                let text_str = text.to_string();
-
-                match serde_json::from_str::<IncomingMessage>(&text_str) {
-                    Ok(incoming) => {
-                        let is_window_event = matches!(
-                            incoming.event.as_deref(),
-                            Some("windowBlur") | Some("windowFocus")
-                        );
-                        if !is_window_event {
-                            log_info(&format!("收到事件: {:?}", incoming.event));
-                        }
-
-                        if let Some(event) = incoming.event {
-                            match event.as_str() {
-                                "ping" => {
-                                    events::handle_ping(
-                                        &conn.token,
-                                        incoming.data.unwrap_or(serde_json::json!({})),
-                                        &mut conn.write,
-                                    )
-                                    .await;
-                                }
-                                "testApiConnection" => {
-                                    events::handle_test_api_connection(
-                                        &conn.token,
-                                        incoming.data.unwrap_or(serde_json::json!({})),
-                                        &mut conn.write,
-                                    )
-                                    .await;
-                                }
-                                "saveConfig" => {
-                                    events::handle_save_config(
-                                        &conn.token,
-                                        incoming.data.unwrap_or(serde_json::json!({})),
-                                        &mut conn.write,
-                                    )
-                                    .await;
-                                }
-                                "loadConfig" => {
-                                    events::handle_load_config(&conn.token, &mut conn.write)
-                                        .await;
-                                }
-                                "startIndex" => {
-                                    events::handle_start_index(
-                                        &conn.token,
-                                        incoming.data.unwrap_or(serde_json::json!({})),
-                                        &mut conn.write,
-                                    )
-                                    .await;
-                                }
-                                "search" => {
-                                    events::handle_search(
-                                        &conn.token,
-                                        incoming.data.unwrap_or(serde_json::json!({})),
-                                        &mut conn.write,
-                                    )
-                                    .await;
-                                }
-                                "getThumbnail" => {
-                                    events::handle_get_thumbnail(
-                                        &conn.token,
-                                        incoming.data.unwrap_or(serde_json::json!({})),
-                                        &mut conn.write,
-                                    )
-                                    .await;
-                                }
-                                "clearIndex" => {
-                                    events::handle_clear_index(&conn.token, &mut conn.write)
-                                        .await;
-                                }
-                                "queryIndex" => {
-                                    events::handle_query_index(
-                                        &conn.token,
-                                        incoming.data.unwrap_or(serde_json::json!({})),
-                                        &mut conn.write,
-                                    )
-                                    .await;
-                                }
-                                "deleteIndexEntries" => {
-                                    events::handle_delete_index_entries(
-                                        &conn.token,
-                                        incoming.data.unwrap_or(serde_json::json!({})),
-                                        &mut conn.write,
-                                    )
-                                    .await;
-                                }
-                                "getPreview" => {
-                                    events::handle_get_preview(
-                                        &conn.token,
-                                        incoming.data.unwrap_or(serde_json::json!({})),
-                                        &mut conn.write,
-                                    )
-                                    .await;
-                                }
-                                "clearAllThumbnails" => {
-                                    events::handle_clear_all_thumbnails(
-                                        &conn.token,
-                                        &mut conn.write,
-                                    )
-                                    .await;
-                                }
-                                "clearExpiredThumbnails" => {
-                                    events::handle_clear_expired_thumbnails(
-                                        &conn.token,
-                                        &mut conn.write,
-                                    )
-                                    .await;
-                                }
-                                "windowBlur" | "windowFocus"
-                                | "clientConnect" | "clientDisconnect"
-                                | "appClientConnect" | "appClientDisconnect"
-                                | "extClientConnect" | "extClientDisconnect"
-                                | "extensionReady" => {
-                                    // NeutralinoJS 框架内部事件，无需处理
-                                }
-                                other => {
-                                    log_info(&format!("收到未知事件: {}", other));
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        log_error(&format!("无法解析消息 JSON: {}", e));
-                    }
-                }
-            }
-            Ok(Message::Close(frame)) => {
-                log_info(&format!("WebSocket 连接关闭: {:?}", frame));
-                break;
-            }
-            Ok(Message::Ping(data)) => {
-                log_info(&format!("收到 WebSocket Ping: {} 字节", data.len()));
-            }
-            Ok(Message::Pong(data)) => {
-                log_info(&format!("收到 WebSocket Pong: {} 字节", data.len()));
-            }
-            Ok(Message::Binary(data)) => {
-                log_info(&format!("收到 WebSocket 二进制消息: {} 字节", data.len()));
-            }
-            Ok(Message::Frame(_)) => {
-                log_info("收到 WebSocket 原始帧");
-            }
-            Err(e) => {
-                log_error(&format!("WebSocket 错误: {}", e));
-                break;
-            }
+/// 从 stdin 读取并解析输入数据
+fn read_and_parse_input() -> Option<ProcessInput> {
+    log_info("开始读取 stdin...");
+    let mut stdin = String::new();
+    match std::io::stdin().read_to_string(&mut stdin) {
+        Ok(bytes) => {
+            log_info(&format!("stdin 读取成功，共 {} 字节", bytes));
+            log_info(&format!("stdin 原始内容: {}", &stdin));
+        }
+        Err(e) => {
+            log_error(&format!("无法读取 stdin: {}", e));
+            return None;
         }
     }
 
-    log_info("扩展进程退出");
+    match serde_json::from_str::<ProcessInput>(&stdin) {
+        Ok(parsed) => {
+            log_info("stdin JSON 解析成功");
+            log_info(&format!("  nlPort:         {}", parsed.nl_port));
+            log_info(&format!(
+                "  nlToken:        {}...",
+                &parsed.nl_token[..8.min(parsed.nl_token.len())]
+            ));
+            log_info(&format!(
+                "  nlConnectToken: {}...",
+                &parsed.nl_connect_token[..8.min(parsed.nl_connect_token.len())]
+            ));
+            log_info(&format!("  nlExtensionId:  {}", parsed.nl_extension_id));
+            Some(parsed)
+        }
+        Err(e) => {
+            log_error(&format!("无法解析 stdin JSON: {}", e));
+            log_error(&format!("原始内容: {}", stdin));
+            None
+        }
+    }
 }

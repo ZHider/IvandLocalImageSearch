@@ -14,6 +14,8 @@ pub const DEFAULT_THUMBNAIL_SIZE: u32 = 300;
 pub const DEFAULT_EMBEDDING_RESIZE: u32 = 1920;
 /// lossy WebP 编码质量 (0-100)
 pub const DEFAULT_WEBP_QUALITY: f32 = 80.0;
+/// HEIC 转 WebP 编码质量 (0-100)
+pub const HEIC_TO_WEBP_QUALITY: f32 = 90.0;
 pub const DEFAULT_TOP_K: usize = 50;
 
 // ---- 缓冲区 ----

@@ -33,7 +33,144 @@ fn is_text_file(path: &str) -> bool {
     file_utils::is_text_file(path)
 }
 
-// ---- diff 对比 ----
+// ---- 进度广播辅助函数 ----
+
+/// 发送索引进度事件到前端
+async fn send_progress(
+    token: &str,
+    write: &mut WsWriter,
+    phase: &str,
+    current: u32,
+    total: u32,
+    extra_fields: Option<serde_json::Value>,
+) {
+    let percentage = if total > 0 {
+        ((current as f64 / total as f64) * 100.0) as u32
+    } else {
+        0
+    };
+
+    let mut payload = serde_json::json!({
+        "phase": phase,
+        "current": current,
+        "total": total,
+        "percentage": percentage,
+    });
+
+    if let Some(extra) = extra_fields {
+        if let Some(obj) = payload.as_object_mut() {
+            if let Some(extra_obj) = extra.as_object() {
+                for (key, value) in extra_obj {
+                    obj.insert(key.clone(), value.clone());
+                }
+            }
+        }
+    }
+
+    let _ = ws_client::send_broadcast(token, "indexProgress", payload, write).await;
+}
+
+// ---- 阶段 1：配置加载 ----
+
+struct IndexingContext {
+    img_opts: image_processing::ProcessingOptions,
+    client: embedding::ApiClient,
+    store: VectorStore,
+    now: String,
+}
+
+async fn load_indexing_config(
+    token: &str,
+    write: &mut WsWriter,
+) -> Result<IndexingContext, ()> {
+    let app_config = match config::load_config_from_file() {
+        Ok(c) => c,
+        Err(e) => {
+            log_error(&format!("加载配置失败: {}", e));
+            let _ = ws_client::send_broadcast(
+                token,
+                "indexError",
+                serde_json::json!({ "error": format!("请先在设置页面配置 API 参数: {}", e) }),
+                write,
+            )
+            .await;
+            return Err(());
+        }
+    };
+
+    let img_opts = image_processing::ProcessingOptions::from(&app_config.image_processing);
+
+    let api_config = config_to_api_config(&app_config);
+    log_info(&format!(
+        "使用 provider={}, base_url={}, model={}",
+        api_config.provider, api_config.base_url, api_config.model
+    ));
+
+    let client = match create_client(&api_config) {
+        Ok(c) => c,
+        Err(e) => {
+            log_error(&format!("创建 embedding 客户端失败: {}", e));
+            let _ = ws_client::send_broadcast(
+                token,
+                "indexError",
+                serde_json::json!({ "error": e }),
+                write,
+            )
+            .await;
+            return Err(());
+        }
+    };
+
+    let store = match VectorStore::init().await {
+        Ok(s) => s,
+        Err(e) => {
+            log_error(&format!("初始化向量存储失败: {}", e));
+            let _ = ws_client::send_broadcast(
+                token,
+                "indexError",
+                serde_json::json!({ "error": e }),
+                write,
+            )
+            .await;
+            return Err(());
+        }
+    };
+
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+
+    Ok(IndexingContext {
+        img_opts,
+        client,
+        store,
+        now,
+    })
+}
+
+// ---- 阶段 2：文件扫描 ----
+
+async fn perform_scan(
+    token: &str,
+    write: &mut WsWriter,
+    folders: &[String],
+) -> Option<scanner::ScanResult> {
+    log_info(&format!("扫描文件夹: {:?}", folders));
+    match scanner::scan_folders(folders) {
+        Ok(r) => Some(r),
+        Err(e) => {
+            log_error(&format!("扫描失败: {}", e));
+            let _ = ws_client::send_broadcast(
+                token,
+                "indexError",
+                serde_json::json!({ "error": e }),
+                write,
+            )
+            .await;
+            None
+        }
+    }
+}
+
+// ---- 阶段 3：差异分析 ----
 
 /// 增量差异分析结果
 struct DiffResult<'a> {
@@ -43,6 +180,31 @@ struct DiffResult<'a> {
     new_count: usize,
     modified_count: usize,
     deleted_count: usize,
+}
+
+async fn analyze_diff<'a>(
+    token: &str,
+    write: &mut WsWriter,
+    scan_result: &'a scanner::ScanResult,
+) -> Option<DiffResult<'a>> {
+    log_info(&format!("扫描到 {} 个文件，开始与数据库对比", scan_result.total));
+    let existing_meta = match metadata::get_all_meta() {
+        Ok(meta) => meta,
+        Err(e) => {
+            log_error(&format!("读取元数据失败: {}", e));
+            let _ = ws_client::send_broadcast(
+                token,
+                "indexError",
+                serde_json::json!({ "error": e.to_string() }),
+                write,
+            )
+            .await;
+            return None;
+        }
+    };
+
+    let diff = diff_with_metadata(scan_result, &existing_meta);
+    Some(diff)
 }
 
 /// 对比扫描结果与已有元数据，找出新增、修改、删除的文件
@@ -134,26 +296,20 @@ async fn process_incremental_files(
 
     for entry in incremental {
         current_step += 1;
-        let percentage = if total_steps > 0 {
-            ((current_step as f64 / total_steps as f64) * 100.0) as u32
-        } else {
-            0
-        };
-        let _ = ws_client::send_broadcast(
+        
+        send_progress(
             token,
-            "indexProgress",
-            serde_json::json!({
-                "phase": "processing",
-                "current": current_step,
-                "total": total_steps,
-                "percentage": percentage,
+            write,
+            "processing",
+            current_step,
+            total_steps,
+            Some(serde_json::json!({
                 "currentFile": entry.file_path,
                 "newCount": new_count,
                 "modifiedCount": modified_count,
                 "deletedCount": deleted_count,
                 "errorCount": error_count,
-            }),
-            write,
+            })),
         )
         .await;
 
@@ -261,43 +417,37 @@ async fn cleanup_deleted_files(
 ) -> u32 {
     for path in deleted_files {
         current_step += 1;
-        let percentage = if total_steps > 0 {
-            ((current_step as f64 / total_steps as f64) * 100.0) as u32
-        } else {
-            0
-        };
 
         if let Err(e) = store.remove_by_file_path(path).await {
             log_error(&format!("删除向量失败 {}: {}", path, e));
         }
         metadata::delete_meta(path).ok();
 
-        let _ = ws_client::send_broadcast(
+        send_progress(
             token,
-            "indexProgress",
-            serde_json::json!({
-                "phase": "cleanup",
-                "current": current_step,
-                "total": total_steps,
-                "percentage": percentage,
+            write,
+            "cleanup",
+            current_step,
+            total_steps,
+            Some(serde_json::json!({
                 "deletedFile": path,
                 "newCount": new_count,
                 "modifiedCount": modified_count,
                 "deletedCount": deleted_count,
                 "errorCount": error_count,
-            }),
-            write,
+            })),
         )
         .await;
     }
     current_step
 }
 
-// ---- 主 handler ----
+// ---- 主 handler：阶段化索引管道 ----
 
 pub async fn handle_start_index(token: &str, data: Value, write: &mut WsWriter) {
     log_info("处理 startIndex 事件");
 
+    // 解析输入数据
     let index_data: StartIndexData = match serde_json::from_value(data) {
         Ok(d) => d,
         Err(e) => {
@@ -313,6 +463,7 @@ pub async fn handle_start_index(token: &str, data: Value, write: &mut WsWriter) 
         }
     };
 
+    // 快速路径：没有文件夹需要扫描
     if index_data.folders.is_empty() {
         log_info("没有需要扫描的文件夹");
         let _ = ws_client::send_broadcast(
@@ -325,151 +476,99 @@ pub async fn handle_start_index(token: &str, data: Value, write: &mut WsWriter) 
         return;
     }
 
-    let app_config = match config::load_config_from_file() {
+    // 阶段 1：加载配置
+    let mut ctx = match load_indexing_config(token, write).await {
         Ok(c) => c,
-        Err(e) => {
-            log_error(&format!("加载配置失败: {}", e));
-            let _ = ws_client::send_broadcast(
-                token,
-                "indexError",
-                serde_json::json!({ "error": format!("请先在设置页面配置 API 参数: {}", e) }),
-                write,
-            )
-            .await;
-            return;
-        }
+        Err(()) => return,
     };
 
-    let img_opts = image_processing::ProcessingOptions::from(&app_config.image_processing);
-
-    let api_config = config_to_api_config(&app_config);
-    log_info(&format!(
-        "使用 provider={}, base_url={}, model={}",
-        api_config.provider, api_config.base_url, api_config.model
-    ));
-
-    let client = match create_client(&api_config) {
-        Ok(c) => c,
-        Err(e) => {
-            log_error(&format!("创建 embedding 客户端失败: {}", e));
-            let _ = ws_client::send_broadcast(
-                token,
-                "indexError",
-                serde_json::json!({ "error": e }),
-                write,
-            )
-            .await;
-            return;
-        }
+    // 阶段 2：扫描文件系统
+    let scan_result = match perform_scan(token, write, &index_data.folders).await {
+        Some(r) => r,
+        None => return,
     };
 
-    log_info(&format!("扫描文件夹: {:?}", index_data.folders));
-    let scan_result = match scanner::scan_folders(&index_data.folders) {
-        Ok(r) => r,
-        Err(e) => {
-            log_error(&format!("扫描失败: {}", e));
-            let _ = ws_client::send_broadcast(
-                token,
-                "indexError",
-                serde_json::json!({ "error": e }),
-                write,
-            )
-            .await;
-            return;
-        }
+    // 阶段 3：差异分析
+    let diff = match analyze_diff(token, write, &scan_result).await {
+        Some(d) => d,
+        None => return,
     };
 
-    log_info(&format!("扫描到 {} 个文件，开始与数据库对比", scan_result.total));
-    let existing_meta = match metadata::get_all_meta() {
-        Ok(meta) => meta,
-        Err(e) => {
-            log_error(&format!("读取元数据失败: {}", e));
-            let _ = ws_client::send_broadcast(
-                token,
-                "indexError",
-                serde_json::json!({ "error": e.to_string() }),
-                write,
-            )
-            .await;
-            return;
-        }
-    };
-
-    let diff = diff_with_metadata(&scan_result, &existing_meta);
+    // 准备增量处理（提取计数，避免后续部分移动问题）
     let new_count = diff.new_count;
     let modified_count = diff.modified_count;
     let deleted_count = diff.deleted_count;
-
+    
     let mut incremental: Vec<&scanner::FileEntry> = Vec::new();
     incremental.extend(diff.new_files);
     incremental.extend(diff.modified_files);
 
     let total_steps = incremental.len() + diff.deleted_files.len();
-    let current_step = 0u32;
 
     // 发送初始进度
-    let _ = ws_client::send_broadcast(
+    send_progress(
         token,
-        "indexProgress",
-        serde_json::json!({
-            "phase": "scanning",
-            "current": current_step,
-            "total": total_steps,
-            "percentage": 0u32,
+        write,
+        "scanning",
+        0,
+        total_steps as u32,
+        Some(serde_json::json!({
             "newCount": new_count,
             "modifiedCount": modified_count,
             "deletedCount": deleted_count,
-        }),
-        write,
+        })),
     )
     .await;
 
-    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
-
-    let mut store = match VectorStore::init().await {
-        Ok(s) => s,
-        Err(e) => {
-            log_error(&format!("初始化向量存储失败: {}", e));
-            let _ = ws_client::send_broadcast(
-                token,
-                "indexError",
-                serde_json::json!({ "error": e }),
-                write,
-            )
-            .await;
-            return;
-        }
-    };
-
+    // 阶段 4：处理增量文件
     let proc_result = process_incremental_files(
-        token, write, &client, &mut store,
-        &incremental, current_step, total_steps as u32,
-        new_count, modified_count, deleted_count, &now, &img_opts,
+        token, write, &ctx.client, &mut ctx.store,
+        &incremental, 0, total_steps as u32,
+        new_count, modified_count, deleted_count, &ctx.now, &ctx.img_opts,
     )
     .await;
 
-    // 清理已删除文件
-    let _final_step = cleanup_deleted_files(
-        token, write, &mut store,
+    // 阶段 5：清理已删除文件
+    cleanup_deleted_files(
+        token, write, &mut ctx.store,
         &diff.deleted_files, proc_result.current_step, total_steps as u32,
         new_count, modified_count, deleted_count, proc_result.error_count,
     )
     .await;
 
+    // 阶段 6：创建索引并完成
+    finalize_indexing(
+        token, write, &mut ctx.store,
+        &scan_result, new_count, modified_count, deleted_count, &proc_result,
+    )
+    .await;
+}
+
+// ---- 阶段 6：完成索引 ----
+
+async fn finalize_indexing(
+    token: &str,
+    write: &mut WsWriter,
+    store: &mut VectorStore,
+    scan_result: &scanner::ScanResult,
+    new_count: usize,
+    modified_count: usize,
+    deleted_count: usize,
+    proc_result: &ProcessResult,
+) {
     // 创建向量索引
     if proc_result.indexed_any {
-        let _ = ws_client::send_broadcast(
+        let total = (new_count + modified_count + deleted_count) as u32;
+        send_progress(
             token,
-            "indexProgress",
-            serde_json::json!({
-                "phase": "indexing",
-                "current": total_steps,
-                "total": total_steps,
-                "percentage": 100u32,
-            }),
             write,
+            "indexing",
+            total,
+            total,
+            Some(serde_json::json!({ "percentage": 100u32 })),
         )
         .await;
+
         if let Err(e) = store.create_index().await {
             log_info(&format!("索引提示: {}（数据量少时属于正常行为）", e));
         }
@@ -523,7 +622,7 @@ async fn process_image_file(
         let thumb = image_processing::generate_thumbnail_from_img(&img, &file_hash, opts.thumbnail_size)
             .unwrap_or_default();
         let webp = image_processing::convert_img_to_webp(
-            &img, &file_hash, opts.embed_image_size, 90.0,
+            &img, &file_hash, opts.embed_image_size, constants::HEIC_TO_WEBP_QUALITY,
         )?;
         (thumb, webp)
     } else {
