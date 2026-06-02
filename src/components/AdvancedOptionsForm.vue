@@ -18,16 +18,16 @@ const jsonError = ref<string | null>(null)
 
 // 所有可选扩展名
 const allExtensions = [
-  { label: 'JPEG (.jpg, .jpeg)', value: 'jpg' },
-  { label: 'JPEG (.jpg, .jpeg)', value: 'jpeg' },
+  { label: 'JPEG (.jpg)', value: 'jpg' },
+  { label: 'JPEG (.jpeg)', value: 'jpeg' },
   { label: 'PNG', value: 'png' },
   { label: 'WebP', value: 'webp' },
   { label: 'BMP', value: 'bmp' },
   { label: 'TIFF (.tiff)', value: 'tiff' },
   { label: 'ICO', value: 'ico' },
   { label: 'GIF', value: 'gif' },
-  { label: 'HEIC / HEIF', value: 'heic' },
-  { label: 'HEIF', value: 'heif' },
+  { label: 'HEIC (.heic)', value: 'heic' },
+  { label: 'HEIF (.heif)', value: 'heif' },
 ]
 
 // 监听 extraEmbeddingParams 的变化，实时校验 JSON
