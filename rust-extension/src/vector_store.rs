@@ -223,6 +223,32 @@ impl VectorStore {
         Ok(())
     }
 
+    /// Drop the entire table and all its data, resetting to empty state.
+    pub async fn clear(&mut self) -> Result<(), String> {
+        if !self.table_exists {
+            return Ok(());
+        }
+        let _ = self.db.drop_table(VECTOR_TABLE, &[]).await;
+        self.table_exists = false;
+        Ok(())
+    }
+
+    /// Remove every row whose file_path matches any of the given paths.
+    pub async fn remove_by_paths(&self, paths: &[String]) -> Result<(), String> {
+        if paths.is_empty() || !self.table_exists {
+            return Ok(());
+        }
+        let tbl = self.open_table().await?;
+        // Build: file_path IN ('escaped1', 'escaped2', ...)
+        let escaped: Vec<String> = paths.iter().map(|p| p.replace('\'', "''")).collect();
+        let values = escaped.iter().map(|p| format!("'{}'", p)).collect::<Vec<_>>().join(", ");
+        let predicate = format!("file_path IN ({})", values);
+        tbl.delete(&predicate)
+            .await
+            .map_err(|e| format!("批量删除失败: {}", e))?;
+        Ok(())
+    }
+
     /// Vector similarity search.  Returns results sorted by cosine similarity
     /// (descending).
     pub async fn search(&self, query: &[f32], top_k: usize) -> Result<Vec<SearchResult>, String> {
@@ -326,6 +352,7 @@ impl VectorStore {
             .await
             .map_err(|e| format!("count_rows 失败: {}", e))
     }
+
 
     /// Build an IVF-PQ index on the vector column for faster search.
     /// Call this once after bulk-loading data.

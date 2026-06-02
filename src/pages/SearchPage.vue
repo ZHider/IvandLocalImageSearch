@@ -58,13 +58,24 @@ const visibleResults = computed(() => {
 const paddingTop = computed(() => startRow.value * (ITEM_HEIGHT + GAP))
 
 const thumbnailCache = ref<Record<string, string>>({})
+const nlPort = (window as any).NL_PORT as string | undefined
+
+function buildThumbUrl(filename: string): string {
+  if (!filename) return ''
+  const name = filename.split(/[\\/]/).pop() || filename
+  if (nlPort) {
+    return `http://localhost:${nlPort}/data/thumbnails/${name}`
+  }
+  // fallback（开发模式 NL_PORT 可能不可用）
+  return `/data/thumbnails/${name}`
+}
 
 function getThumbSrc(filePath: string, thumbnailPath: string): string {
   if (thumbnailCache.value[filePath]) {
     return thumbnailCache.value[filePath]
   }
   if (thumbnailPath) {
-    thumbnailCache.value[filePath] = `file://${thumbnailPath.replace(/\\/g, '/')}`
+    thumbnailCache.value[filePath] = buildThumbUrl(thumbnailPath)
     return thumbnailCache.value[filePath]
   }
   return ''
@@ -98,11 +109,10 @@ onMounted(() => {
       const err = data as { error?: string }
       message.error(`搜索失败: ${err?.error || '未知错误'}`)
     }),
-
     on('thumbnailReady', (data: unknown) => {
       const d = data as { imagePath: string; thumbnailPath: string }
       if (d.thumbnailPath) {
-        thumbnailCache.value[d.imagePath] = `file://${d.thumbnailPath.replace(/\\/g, '/')}`
+        thumbnailCache.value[d.imagePath] = buildThumbUrl(d.thumbnailPath)
       }
     }),
 
@@ -240,6 +250,7 @@ onUnmounted(() => {
 
       <n-empty
         v-else-if="!searching"
+
         description="请输入搜索词或选择图片开始搜索"
         class="search-empty"
       />

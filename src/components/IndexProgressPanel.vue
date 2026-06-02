@@ -1,16 +1,5 @@
 <script setup lang="ts">
-interface IndexProgress {
-  phase: string
-  current: number
-  total: number
-  percentage: number
-  currentFile?: string
-  deletedFile?: string
-  newCount: number
-  modifiedCount: number
-  deletedCount: number
-  errorCount?: number
-}
+import type { IndexProgress } from '../types'
 
 defineProps<{
   progress: IndexProgress | null

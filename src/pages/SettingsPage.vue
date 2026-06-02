@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, h } from 'vue'
+import { ref, h } from 'vue'
 import type { MenuOption } from 'naive-ui'
 import { useAppConfig } from '../composables/useAppConfig'
 import ApiSettingsForm from '../components/ApiSettingsForm.vue'
@@ -30,12 +30,6 @@ const menuOptions: MenuOption[] = [
   },
 ]
 
-const tabTitleMap: Record<string, string> = {
-  api: 'API 设置',
-  image: '图片处理',
-}
-
-const currentTitle = computed(() => tabTitleMap[activeTab.value] || '设置')
 </script>
 
 <template>
@@ -57,9 +51,6 @@ const currentTitle = computed(() => tabTitleMap[activeTab.value] || '设置')
         <div class="settings-body">
           <Transition name="slide" mode="out-in">
             <div :key="activeTab" class="settings-section">
-              <div class="settings-header">
-                <h3 class="settings-header-title">{{ currentTitle }}</h3>
-              </div>
               <ImageProcessingForm
                 v-if="activeTab === 'image'"
                 :config="config"
@@ -115,19 +106,6 @@ const currentTitle = computed(() => tabTitleMap[activeTab.value] || '设置')
   display: flex;
   flex-direction: column;
 }
-
-.settings-header {
-  flex-shrink: 0;
-  padding: 16px 24px;
-  border-bottom: 1px solid var(--n-border-color, #e5e7eb);
-}
-
-.settings-header-title {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-}
-
 .settings-body {
   flex: 1;
   padding: 20px 24px;

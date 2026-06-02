@@ -9,6 +9,7 @@ defineProps<{
 
 const emit = defineEmits<{
   preview: []
+  thumbnailError: []
 }>()
 
 function formatSize(bytes: number): string {
@@ -36,6 +37,7 @@ function getSimilarityColor(sim: number): string {
         v-if="thumbnailSrc"
         :src="thumbnailSrc"
         :data-file-path="item.file_path"
+        @error="emit('thumbnailError')"
         class="thumb-img"
         loading="lazy"
       />

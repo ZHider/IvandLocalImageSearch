@@ -1,7 +1,6 @@
 export type ApiType = 'ollama' | 'llamacpp' | 'openai' | 'custom' | ''
 
 export interface ImageProcessingConfig {
-  embedImageSize: number
   thumbnailSize: number
 }
 
@@ -16,8 +15,13 @@ export interface AppConfig {
   imageProcessing: ImageProcessingConfig
 }
 
+export interface ImageProcessingConfig {
+  embedImageSize: number
+  thumbnailSize: number
+}
+
 export const DEFAULT_IMAGE_PROCESSING: ImageProcessingConfig = {
-  embedImageSize: 512,
+  embedImageSize: 1920,
   thumbnailSize: 300,
 }
 
@@ -55,6 +59,55 @@ export interface SearchResult {
     focal_length?: string
     date_taken?: string
   }
+}
+
+export interface IndexProgress {
+  phase: string
+  current: number
+  total: number
+  percentage: number
+  currentFile?: string
+  deletedFile?: string
+  newCount: number
+  modifiedCount: number
+  deletedCount: number
+  errorCount?: number
+}
+
+export interface IndexResultFile {
+  file_path: string
+  file_size: number
+  modified_at: number
+  file_hash: string
+}
+
+
+export interface IndexFileMeta {
+  filePath: string
+  fileHash: string
+  indexedAt: string
+}
+
+export interface QueryIndexParams {
+  pathFilter?: string
+  timeAfter?: string
+  timeBefore?: string
+  page?: number
+  pageSize?: number
+}
+
+export interface QueryIndexResult {
+  files: IndexFileMeta[]
+  total: number
+}
+
+export interface IndexResult {
+  files: IndexResultFile[]
+  total: number
+  newCount: number
+  modifiedCount: number
+  deletedCount: number
+  errorCount?: number
 }
 
 export interface ApiConnectionParams {

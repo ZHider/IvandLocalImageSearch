@@ -34,10 +34,6 @@ pub async fn handle_test_api_connection(token: &str, data: Value, write: &mut Ws
         config.provider, config.base_url, config.model
     ));
     log_info(&format!(
-        "vision_model: {}",
-        config.vision_model.as_deref().unwrap_or("(无)")
-    ));
-    log_info(&format!(
         "将请求 GET {}/models 检测连通性",
         config.base_url.trim_end_matches('/')
     ));

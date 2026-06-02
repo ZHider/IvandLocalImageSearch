@@ -8,7 +8,6 @@ use serde_json::Value;
 use crate::config;
 use crate::constants;
 use crate::embedding::create_client;
-use crate::image_processing;
 use crate::log_error;
 use crate::log_info;
 use crate::vector_store::VectorStore;
@@ -114,21 +113,7 @@ pub async fn handle_search(token: &str, data: Value, write: &mut WsWriter) {
                 .await;
                 return;
             }
-            let base64 = match image_processing::encode_base64(image_path, constants::DEFAULT_EMBEDDING_RESIZE) {
-                Ok(b) => b,
-                Err(e) => {
-                    log_error(&format!("图片预处理失败: {}", e));
-                    let _ = ws_client::send_broadcast(
-                        token,
-                        "searchError",
-                        serde_json::json!({ "error": e }),
-                        write,
-                    )
-                    .await;
-                    return;
-                }
-            };
-            match client.embed_image(&base64).await {
+            match client.embed_image(image_path).await {
                 Ok(v) => v,
                 Err(e) => {
                     log_error(&format!("图片 embedding 失败: {}", e));

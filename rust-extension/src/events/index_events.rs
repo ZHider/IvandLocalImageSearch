@@ -508,13 +508,34 @@ async fn process_image_file(
     file_hash: String,
     opts: &image_processing::ProcessingOptions,
 ) -> Result<Vec<crate::vector_store::VectorEntry>, String> {
-    let thumbnail_path = image_processing::generate_thumbnail(file_path, opts.thumbnail_size).unwrap_or_default();
+    log_info(&format!("process_image_file: 开始处理 {}", file_path));
     let exif = image_processing::extract_exif(file_path).unwrap_or_default();
-    let base64 = image_processing::encode_base64(file_path, opts.embed_image_size)?;
 
+    let is_heic = matches!(
+        std::path::Path::new(file_path).extension().and_then(|e| e.to_str()),
+        Some("heic" | "heif")
+    );
 
-    let vector = client.embed_image(&base64).await?;
-    log_info(&format!("向量维数: {}", vector.len()));
+    let (thumbnail_path, embed_path) = if is_heic {
+        // HEIC: 解码一次，同时用于缩略图 + WebP 缓存（避免重复解码 24MP）
+        let img = image_processing::open_image(file_path)
+            .map_err(|e| format!("解码 HEIC 失败: {}", e))?;
+        let thumb = image_processing::generate_thumbnail_from_img(&img, &file_hash, opts.thumbnail_size)
+            .unwrap_or_default();
+        let webp = image_processing::convert_img_to_webp(
+            &img, &file_hash, opts.embed_image_size, 90.0,
+        )?;
+        (thumb, webp)
+    } else {
+        let thumb = image_processing::generate_thumbnail(file_path, opts.thumbnail_size)
+            .unwrap_or_default();
+        (thumb, file_path.to_string())
+    };
+
+    log_info(&format!("process_image_file: 缩略图路径={}", thumbnail_path));
+    log_info(&format!("process_image_file: 调用 embed_image, path={}", embed_path));
+    let vector = client.embed_image(&embed_path).await?;
+    log_info(&format!("process_image_file: embedding 完成, 向量维数={}", vector.len()));
 
     let metadata = serde_json::json!({
         "file_path": file_path,

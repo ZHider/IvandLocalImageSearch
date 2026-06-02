@@ -20,7 +20,7 @@ const emit = defineEmits<{
       label-width="140"
       require-mark-placement="right-hanging"
     >
-      <n-divider>图片预处理</n-divider>
+      <n-divider>嵌入图片</n-divider>
       <n-form-item label="最长边尺寸 (px)">
         <n-input-number
           v-model:value="config.imageProcessing.embedImageSize"
@@ -30,11 +30,11 @@ const emit = defineEmits<{
           style="width: 200px"
         />
         <n-text depth="3" style="margin-left: 12px; font-size: 13px;">
-          喂给模型前缩放的最长边像素，默认 1280
+          HEIC 转 WebP 时缩放的最长边像素，默认 1280
         </n-text>
       </n-form-item>
-
       <n-divider>缩略图</n-divider>
+
       <n-form-item label="最长边尺寸 (px)">
         <n-input-number
           v-model:value="config.imageProcessing.thumbnailSize"

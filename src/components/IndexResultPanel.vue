@@ -1,22 +1,8 @@
 <script setup lang="ts">
-interface IndexResultFile {
-  file_path: string
-  file_size: number
-  modified_at: number
-  file_hash: string
-}
-
-interface IndexComplete {
-  files: IndexResultFile[]
-  total: number
-  newCount: number
-  modifiedCount: number
-  deletedCount: number
-  errorCount?: number
-}
+import type { IndexResult } from '../types'
 
 defineProps<{
-  result: IndexComplete | null
+  result: IndexResult | null
 }>()
 
 function formatSize(bytes: number): string {

@@ -21,12 +21,13 @@ pub struct AppConfig {
     pub image_processing: ImageProcessingConfig,
 }
 
-fn default_embed_image_size() -> u32 {
-    constants::DEFAULT_EMBEDDING_RESIZE
-}
 
 fn default_thumbnail_size() -> u32 {
     constants::DEFAULT_THUMBNAIL_SIZE
+}
+
+fn default_embed_image_size() -> u32 {
+    constants::DEFAULT_EMBEDDING_RESIZE
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -45,6 +46,7 @@ impl Default for ImageProcessingConfig {
         }
     }
 }
+
 pub fn get_config_path() -> std::path::PathBuf {
     file_utils::get_data_dir().join("config.json")
 }

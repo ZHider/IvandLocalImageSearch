@@ -174,6 +174,26 @@ async fn main() {
                                     )
                                     .await;
                                 }
+                                "clearIndex" => {
+                                    events::handle_clear_index(&conn.token, &mut conn.write)
+                                        .await;
+                                }
+                                "queryIndex" => {
+                                    events::handle_query_index(
+                                        &conn.token,
+                                        incoming.data.unwrap_or(serde_json::json!({})),
+                                        &mut conn.write,
+                                    )
+                                    .await;
+                                }
+                                "deleteIndexEntries" => {
+                                    events::handle_delete_index_entries(
+                                        &conn.token,
+                                        incoming.data.unwrap_or(serde_json::json!({})),
+                                        &mut conn.write,
+                                    )
+                                    .await;
+                                }
                                 "getPreview" => {
                                     events::handle_get_preview(
                                         &conn.token,
@@ -182,8 +202,26 @@ async fn main() {
                                     )
                                     .await;
                                 }
-                                "windowBlur" | "windowFocus" => {
-                                    // NeutralinoJS 窗口事件，无需处理
+                                "clearAllThumbnails" => {
+                                    events::handle_clear_all_thumbnails(
+                                        &conn.token,
+                                        &mut conn.write,
+                                    )
+                                    .await;
+                                }
+                                "clearExpiredThumbnails" => {
+                                    events::handle_clear_expired_thumbnails(
+                                        &conn.token,
+                                        &mut conn.write,
+                                    )
+                                    .await;
+                                }
+                                "windowBlur" | "windowFocus"
+                                | "clientConnect" | "clientDisconnect"
+                                | "appClientConnect" | "appClientDisconnect"
+                                | "extClientConnect" | "extClientDisconnect"
+                                | "extensionReady" => {
+                                    // NeutralinoJS 框架内部事件，无需处理
                                 }
                                 other => {
                                     log_info(&format!("收到未知事件: {}", other));

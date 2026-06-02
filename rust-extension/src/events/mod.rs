@@ -4,6 +4,7 @@ mod config_events;
 mod index_events;
 mod search_events;
 mod media_events;
+mod manage_events;
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -51,7 +52,6 @@ pub(crate) fn config_to_api_config(config: &AppConfig) -> ApiConfig {
         base_url,
         api_key: config.api_key.clone(),
         model: config.model_name.clone(),
-        vision_model: None,
     }
 }
 
@@ -64,5 +64,14 @@ pub use config_events::{
 };
 pub use index_events::handle_start_index;
 pub use search_events::handle_search;
-pub use media_events::handle_get_thumbnail;
-pub use media_events::handle_get_preview;
+pub use media_events::{
+    handle_get_thumbnail,
+    handle_get_preview,
+    handle_clear_all_thumbnails,
+    handle_clear_expired_thumbnails,
+};
+pub use manage_events::{
+    handle_clear_index,
+    handle_query_index,
+    handle_delete_index_entries,
+};

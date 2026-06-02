@@ -1,88 +1,32 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
-import { os } from '@neutralinojs/lib'
+import { ref, h } from 'vue'
+import type { MenuOption } from 'naive-ui'
 import { useMessage } from 'naive-ui'
-import { useExtension } from '../composables/useExtension'
+import { os } from '@neutralinojs/lib'
 import { useAppConfig } from '../composables/useAppConfig'
-import FolderManager from '../components/FolderManager.vue'
-import IndexProgressPanel from '../components/IndexProgressPanel.vue'
-import IndexResultPanel from '../components/IndexResultPanel.vue'
-
-interface IndexProgress {
-  phase: string
-  current: number
-  total: number
-  percentage: number
-  currentFile?: string
-  deletedFile?: string
-  newCount: number
-  modifiedCount: number
-  deletedCount: number
-  errorCount?: number
-}
-
-interface IndexComplete {
-  files: Array<{
-    file_path: string
-    file_size: number
-    modified_at: number
-    file_hash: string
-  }>
-  total: number
-  newCount: number
-  modifiedCount: number
-  deletedCount: number
-  errorCount?: number
-}
+import { useIndex } from '../composables/useIndex'
+import IndexBuildForm from '../components/IndexBuildForm.vue'
+import IndexManagePanel from '../components/IndexManagePanel.vue'
 
 const message = useMessage()
-const { send, on } = useExtension()
 const { config, saveConfig: doSave } = useAppConfig()
+const { indexing, progress, result, start: startIndex } = useIndex()
 
-const indexing = ref(false)
+const activeTab = ref<string>('build')
+
+const menuOptions: MenuOption[] = [
+  {
+    label: '建立索引',
+    key: 'build',
+    icon: () => h('span', '📂'),
+  },
+  {
+    label: '管理索引',
+    key: 'manage',
+    icon: () => h('span', '🗂️'),
+  },
+]
 const addFolderDisabled = ref(false)
-
-const progress = ref<IndexProgress | null>(null)
-const result = ref<IndexComplete | null>(null)
-
-onMounted(() => {
-  const cleanups = [
-    on('indexProgress', (data: unknown) => {
-      progress.value = data as IndexProgress
-    }),
-
-    on('indexComplete', (data: unknown) => {
-      indexing.value = false
-      progress.value = null
-      result.value = data as IndexComplete
-      const r = data as IndexComplete
-      const msgParts = [`新增 ${r.newCount}`, `修改 ${r.modifiedCount}`, `删除 ${r.deletedCount}`]
-      if (r.errorCount && r.errorCount > 0) {
-        msgParts.push(`失败 ${r.errorCount}`)
-        message.warning(`索引完成 ⚠️ ${msgParts.join(' ')}`)
-      } else {
-        message.success(`索引完成 ✅ ${msgParts.join(' ')}`)
-      }
-    }),
-
-    on('indexError', (data: unknown) => {
-      indexing.value = false
-      progress.value = null
-      const err = data as { error?: string }
-      message.error(`索引失败: ${err?.error || '未知错误'}`)
-    }),
-  ]
-
-  onUnmounted(() => {
-    cleanups.forEach(stop => stop())
-  })
-})
-
-onUnmounted(() => {
-  indexing.value = false
-  progress.value = null
-  result.value = null
-})
 
 async function addFolder() {
   try {
@@ -117,60 +61,91 @@ function removeFolder(index: number) {
   doSave()
 }
 
-function startIndex() {
+function handleStartIndex() {
   if (config.value.folders.length === 0) {
     message.warning('请先添加要索引的文件夹')
     return
   }
-
-  indexing.value = true
-  result.value = null
-  progress.value = null
-
-  send('startIndex', {
-    folders: config.value.folders,
-  })
+  startIndex(config.value.folders)
 }
 </script>
 
 <template>
   <div class="index-container">
-    <n-card title="📂 索引管理" class="index-card">
-      <n-space vertical :size="16">
-        <FolderManager
-          :folders="config.folders"
-          :add-folder-disabled="addFolderDisabled"
-          :indexing="indexing"
-          @addFolder="addFolder"
-          @removeFolder="removeFolder"
+    <n-layout class="index-layout" has-sider>
+      <n-layout-sider
+        bordered
+        content-style="padding: 0;"
+        width="200"
+        :native-scrollbar="false"
+      >
+        <n-menu
+          v-model:value="activeTab"
+          :options="menuOptions"
+          :collapsed="false"
         />
-
-        <n-button
-          type="primary"
-          size="large"
-          @click="startIndex"
-          :loading="indexing"
-          :disabled="config.folders.length === 0"
-          block
-        >
-          {{ indexing ? '索引进行中...' : '🚀 开始索引' }}
-        </n-button>
-
-        <IndexProgressPanel :progress="progress" />
-
-        <IndexResultPanel :result="result" />
-      </n-space>
-    </n-card>
+      </n-layout-sider>
+      <n-layout-content class="index-content" :native-scrollbar="false">
+        <div class="index-body">
+          <Transition name="slide" mode="out-in">
+            <div :key="activeTab" class="index-section">
+              <IndexBuildForm
+                v-if="activeTab === 'build'"
+                :folders="config.folders"
+                :indexing="indexing"
+                :add-folder-disabled="addFolderDisabled"
+                :progress="progress"
+                :result="result"
+                @addFolder="addFolder"
+                @removeFolder="removeFolder"
+                @startIndex="handleStartIndex"
+              />
+              <IndexManagePanel v-else />
+            </div>
+          </Transition>
+        </div>
+      </n-layout-content>
+    </n-layout>
   </div>
 </template>
 
 <style scoped>
-.index-container {
-  padding: 20px;
+
+.slide-enter-active,
+.slide-leave-active {
+  transition: all 0.1s ease;
 }
 
-.index-card {
+.slide-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+
+.slide-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+.index-container {
+  height: 100%;
+}
+
+.index-layout {
+  height: 100%;
+}
+
+.index-content {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.index-body {
+  flex: 1;
+  padding: 20px 24px;
+  overflow-y: auto;
+}
+
+.index-section {
   max-width: 800px;
-  margin: 0 auto;
 }
 </style>
