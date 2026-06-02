@@ -1,4 +1,4 @@
-use std::fs;
+use crate::file_utils;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
@@ -22,16 +22,13 @@ pub struct ExifInfo {
     pub gps_longitude: Option<String>,
 }
 
+
 fn get_thumbnails_dir() -> PathBuf {
-    std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("data")
-        .join("thumbnails")
+    file_utils::get_thumbnails_dir()
 }
 
 fn ensure_thumbnails_dir() -> Result<(), String> {
-    let dir = get_thumbnails_dir();
-    fs::create_dir_all(&dir).map_err(|e| format!("创建缩略图目录失败: {}", e))
+    file_utils::ensure_thumbnails_dir()
 }
 
 fn resize_dimensions(width: u32, height: u32, max_size: u32) -> (u32, u32) {

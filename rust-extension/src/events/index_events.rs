@@ -1,0 +1,583 @@
+//! 索引事件：扫描文件、diff 对比、增量处理、清理删除。
+
+use std::collections::HashMap;
+
+use serde::Deserialize;
+use serde_json::Value;
+
+use crate::config;
+use crate::constants;
+use crate::embedding::{self, create_client};
+use crate::file_utils;
+use crate::image_processing;
+use crate::log_error;
+use crate::log_info;
+use crate::metadata;
+use crate::scanner;
+use crate::text_chunker;
+use crate::vector_store::VectorStore;
+use crate::ws_client::{self, WsWriter};
+
+use super::config_to_api_config;
+
+#[derive(Deserialize)]
+struct StartIndexData {
+    folders: Vec<String>,
+}
+
+fn is_image_file(path: &str) -> bool {
+    file_utils::is_image_file(path)
+}
+
+fn is_text_file(path: &str) -> bool {
+    file_utils::is_text_file(path)
+}
+
+// ---- diff 对比 ----
+
+/// 增量差异分析结果
+struct DiffResult<'a> {
+    new_files: Vec<&'a scanner::FileEntry>,
+    modified_files: Vec<&'a scanner::FileEntry>,
+    deleted_files: Vec<String>,
+    new_count: usize,
+    modified_count: usize,
+    deleted_count: usize,
+}
+
+/// 对比扫描结果与已有元数据，找出新增、修改、删除的文件
+fn diff_with_metadata<'a>(
+    scan_result: &'a scanner::ScanResult,
+    existing_meta: &[metadata::IndexMeta],
+) -> DiffResult<'a> {
+    let meta_map: HashMap<String, String> = existing_meta
+        .iter()
+        .map(|m| (m.file_path.clone(), m.file_hash.clone()))
+        .collect();
+
+    let scan_map: HashMap<String, &scanner::FileEntry> = scan_result
+        .files
+        .iter()
+        .map(|f| (f.file_path.clone(), f))
+        .collect();
+
+    let mut new_files: Vec<&scanner::FileEntry> = Vec::new();
+    let mut modified_files: Vec<&scanner::FileEntry> = Vec::new();
+    let mut deleted_files: Vec<String> = Vec::new();
+
+    for (path, entry) in &scan_map {
+        match meta_map.get(path) {
+            None => new_files.push(entry),
+            Some(old_hash) => {
+                if old_hash != &entry.file_hash {
+                    modified_files.push(entry);
+                }
+            }
+        }
+    }
+
+    for path in meta_map.keys() {
+        if !scan_map.contains_key(path) {
+            deleted_files.push(path.clone());
+        }
+    }
+
+    let new_count = new_files.len();
+    let modified_count = modified_files.len();
+    let deleted_count = deleted_files.len();
+
+    log_info(&format!(
+        "对比结果: 新增 {} 个, 修改 {} 个, 删除 {} 个",
+        new_count, modified_count, deleted_count
+    ));
+
+    DiffResult {
+        new_files,
+        modified_files,
+        deleted_files,
+        new_count,
+        modified_count,
+        deleted_count,
+    }
+}
+
+// ---- 增量处理 ----
+
+/// 处理增量文件的结果
+struct ProcessResult {
+    processed_files: Vec<serde_json::Value>,
+    error_count: u32,
+    current_step: u32,
+    indexed_any: bool,
+}
+
+/// 批量处理增量文件（嵌入并写入向量存储）
+async fn process_incremental_files(
+    token: &str,
+    write: &mut WsWriter,
+    client: &embedding::ApiClient,
+    store: &mut VectorStore,
+    incremental: &[&scanner::FileEntry],
+    mut current_step: u32,
+    total_steps: u32,
+    new_count: usize,
+    modified_count: usize,
+    deleted_count: usize,
+    now: &str,
+) -> ProcessResult {
+    let mut processed_files: Vec<serde_json::Value> = Vec::new();
+    let mut error_count = 0u32;
+    let mut indexed_any = false;
+    let chunk_size = constants::DEFAULT_CHUNK_SIZE;
+    let chunk_overlap = constants::DEFAULT_CHUNK_OVERLAP;
+
+    for entry in incremental {
+        current_step += 1;
+        let percentage = if total_steps > 0 {
+            ((current_step as f64 / total_steps as f64) * 100.0) as u32
+        } else {
+            0
+        };
+        let _ = ws_client::send_broadcast(
+            token,
+            "indexProgress",
+            serde_json::json!({
+                "phase": "processing",
+                "current": current_step,
+                "total": total_steps,
+                "percentage": percentage,
+                "currentFile": entry.file_path,
+                "newCount": new_count,
+                "modifiedCount": modified_count,
+                "deletedCount": deleted_count,
+                "errorCount": error_count,
+            }),
+            write,
+        )
+        .await;
+
+        let file_name = std::path::Path::new(&entry.file_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+
+        if is_image_file(&entry.file_path) {
+            match process_image_file(
+                client,
+                &entry.file_path,
+                &file_name,
+                entry.file_size,
+                entry.modified_at,
+                entry.file_hash.clone(),
+            )
+            .await
+            {
+                Ok(entries) => {
+                    let dim = entries.first().map(|e| e.vector.len()).unwrap_or(0);
+                    log_info(&format!("batch_upsert 图片 {} 向量维数: {}", entry.file_path, dim));
+                    if let Err(e) = store.batch_upsert(&entries).await {
+                        error_count += 1;
+                        log_error(&format!("写入向量存储失败 {}: {}", entry.file_path, e));
+                    } else {
+                        indexed_any = true;
+                        for _ve in &entries {
+                            processed_files.push(serde_json::json!({
+                                "file_path": entry.file_path,
+                                "file_size": entry.file_size,
+                                "modified_at": entry.modified_at,
+                                "file_hash": entry.file_hash,
+                            }));
+                        }
+                        metadata::insert_meta(&entry.file_path, &entry.file_hash, now).ok();
+                    }
+                }
+                Err(e) => {
+                    error_count += 1;
+                    log_error(&format!("处理图片失败 {}: {}", entry.file_path, e));
+                }
+            }
+        } else if is_text_file(&entry.file_path) {
+            match process_text_file(
+                client,
+                &entry.file_path,
+                &file_name,
+                entry.file_size,
+                entry.modified_at,
+                chunk_size,
+                chunk_overlap,
+            )
+            .await
+            {
+                Ok(entries) => {
+                    if let Err(e) = store.batch_upsert(&entries).await {
+                        error_count += 1;
+                        log_error(&format!("写入向量存储失败 {}: {}", entry.file_path, e));
+                    } else {
+                        indexed_any = true;
+                        for _ve in &entries {
+                            processed_files.push(serde_json::json!({
+                                "file_path": entry.file_path,
+                                "file_size": entry.file_size,
+                                "modified_at": entry.modified_at,
+                                "file_hash": entry.file_hash,
+                            }));
+                        }
+                        metadata::insert_meta(&entry.file_path, &entry.file_hash, now).ok();
+                    }
+                }
+                Err(e) => {
+                    error_count += 1;
+                    log_error(&format!("处理文本失败 {}: {}", entry.file_path, e));
+                }
+            }
+        }
+    }
+
+    ProcessResult {
+        processed_files,
+        error_count,
+        current_step,
+        indexed_any,
+    }
+}
+
+// ---- 清理删除文件 ----
+
+/// 清理已删除文件的向量和元数据
+async fn cleanup_deleted_files(
+    token: &str,
+    write: &mut WsWriter,
+    store: &mut VectorStore,
+    deleted_files: &[String],
+    mut current_step: u32,
+    total_steps: u32,
+    new_count: usize,
+    modified_count: usize,
+    deleted_count: usize,
+    error_count: u32,
+) -> u32 {
+    for path in deleted_files {
+        current_step += 1;
+        let percentage = if total_steps > 0 {
+            ((current_step as f64 / total_steps as f64) * 100.0) as u32
+        } else {
+            0
+        };
+
+        if let Err(e) = store.remove_by_file_path(path).await {
+            log_error(&format!("删除向量失败 {}: {}", path, e));
+        }
+        metadata::delete_meta(path).ok();
+
+        let _ = ws_client::send_broadcast(
+            token,
+            "indexProgress",
+            serde_json::json!({
+                "phase": "cleanup",
+                "current": current_step,
+                "total": total_steps,
+                "percentage": percentage,
+                "deletedFile": path,
+                "newCount": new_count,
+                "modifiedCount": modified_count,
+                "deletedCount": deleted_count,
+                "errorCount": error_count,
+            }),
+            write,
+        )
+        .await;
+    }
+    current_step
+}
+
+// ---- 主 handler ----
+
+pub async fn handle_start_index(token: &str, data: Value, write: &mut WsWriter) {
+    log_info("处理 startIndex 事件");
+
+    let index_data: StartIndexData = match serde_json::from_value(data) {
+        Ok(d) => d,
+        Err(e) => {
+            log_error(&format!("解析 startIndex 数据失败: {}", e));
+            let _ = ws_client::send_broadcast(
+                token,
+                "indexError",
+                serde_json::json!({ "error": e.to_string() }),
+                write,
+            )
+            .await;
+            return;
+        }
+    };
+
+    if index_data.folders.is_empty() {
+        log_info("没有需要扫描的文件夹");
+        let _ = ws_client::send_broadcast(
+            token,
+            "indexComplete",
+            serde_json::json!({ "files": [], "total": 0, "newCount": 0, "modifiedCount": 0, "deletedCount": 0 }),
+            write,
+        )
+        .await;
+        return;
+    }
+
+    let app_config = match config::load_config_from_file() {
+        Ok(c) => c,
+        Err(e) => {
+            log_error(&format!("加载配置失败: {}", e));
+            let _ = ws_client::send_broadcast(
+                token,
+                "indexError",
+                serde_json::json!({ "error": format!("请先在设置页面配置 API 参数: {}", e) }),
+                write,
+            )
+            .await;
+            return;
+        }
+    };
+
+    let api_config = config_to_api_config(&app_config);
+    log_info(&format!(
+        "使用 provider={}, base_url={}, model={}",
+        api_config.provider, api_config.base_url, api_config.model
+    ));
+
+    let client = match create_client(&api_config) {
+        Ok(c) => c,
+        Err(e) => {
+            log_error(&format!("创建 embedding 客户端失败: {}", e));
+            let _ = ws_client::send_broadcast(
+                token,
+                "indexError",
+                serde_json::json!({ "error": e }),
+                write,
+            )
+            .await;
+            return;
+        }
+    };
+
+    log_info(&format!("扫描文件夹: {:?}", index_data.folders));
+    let scan_result = match scanner::scan_folders(&index_data.folders) {
+        Ok(r) => r,
+        Err(e) => {
+            log_error(&format!("扫描失败: {}", e));
+            let _ = ws_client::send_broadcast(
+                token,
+                "indexError",
+                serde_json::json!({ "error": e }),
+                write,
+            )
+            .await;
+            return;
+        }
+    };
+
+    log_info(&format!("扫描到 {} 个文件，开始与数据库对比", scan_result.total));
+    let existing_meta = match metadata::get_all_meta() {
+        Ok(meta) => meta,
+        Err(e) => {
+            log_error(&format!("读取元数据失败: {}", e));
+            let _ = ws_client::send_broadcast(
+                token,
+                "indexError",
+                serde_json::json!({ "error": e.to_string() }),
+                write,
+            )
+            .await;
+            return;
+        }
+    };
+
+    let diff = diff_with_metadata(&scan_result, &existing_meta);
+    let new_count = diff.new_count;
+    let modified_count = diff.modified_count;
+    let deleted_count = diff.deleted_count;
+
+    let mut incremental: Vec<&scanner::FileEntry> = Vec::new();
+    incremental.extend(diff.new_files);
+    incremental.extend(diff.modified_files);
+
+    let total_steps = incremental.len() + diff.deleted_files.len();
+    let current_step = 0u32;
+
+    // 发送初始进度
+    let _ = ws_client::send_broadcast(
+        token,
+        "indexProgress",
+        serde_json::json!({
+            "phase": "scanning",
+            "current": current_step,
+            "total": total_steps,
+            "percentage": 0u32,
+            "newCount": new_count,
+            "modifiedCount": modified_count,
+            "deletedCount": deleted_count,
+        }),
+        write,
+    )
+    .await;
+
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+
+    let mut store = match VectorStore::init().await {
+        Ok(s) => s,
+        Err(e) => {
+            log_error(&format!("初始化向量存储失败: {}", e));
+            let _ = ws_client::send_broadcast(
+                token,
+                "indexError",
+                serde_json::json!({ "error": e }),
+                write,
+            )
+            .await;
+            return;
+        }
+    };
+
+    // 处理增量文件
+    let proc_result = process_incremental_files(
+        token, write, &client, &mut store,
+        &incremental, current_step, total_steps as u32,
+        new_count, modified_count, deleted_count, &now,
+    )
+    .await;
+
+    // 清理已删除文件
+    let _final_step = cleanup_deleted_files(
+        token, write, &mut store,
+        &diff.deleted_files, proc_result.current_step, total_steps as u32,
+        new_count, modified_count, deleted_count, proc_result.error_count,
+    )
+    .await;
+
+    // 创建向量索引
+    if proc_result.indexed_any {
+        let _ = ws_client::send_broadcast(
+            token,
+            "indexProgress",
+            serde_json::json!({
+                "phase": "indexing",
+                "current": total_steps,
+                "total": total_steps,
+                "percentage": 100u32,
+            }),
+            write,
+        )
+        .await;
+        if let Err(e) = store.create_index().await {
+            log_info(&format!("索引提示: {}（数据量少时属于正常行为）", e));
+        }
+    }
+
+    log_info(&format!(
+        "索引完成，增量文件 {} 个，错误 {} 个",
+        proc_result.processed_files.len(),
+        proc_result.error_count
+    ));
+
+    let _ = ws_client::send_broadcast(
+        token,
+        "indexComplete",
+        serde_json::json!({
+            "files": proc_result.processed_files,
+            "total": scan_result.total,
+            "newCount": new_count,
+            "modifiedCount": modified_count,
+            "deletedCount": deleted_count,
+            "errorCount": proc_result.error_count,
+        }),
+        write,
+    )
+    .await;
+}
+
+// ---- 文件处理器 ----
+
+async fn process_image_file(
+    client: &embedding::ApiClient,
+    file_path: &str,
+    file_name: &str,
+    file_size: u64,
+    modified_at: u64,
+    file_hash: String,
+) -> Result<Vec<crate::vector_store::VectorEntry>, String> {
+
+    let thumbnail_path = image_processing::generate_thumbnail(file_path, constants::DEFAULT_THUMBNAIL_SIZE).unwrap_or_default();
+
+    let exif = image_processing::extract_exif(file_path).unwrap_or_default();
+
+    let base64 = image_processing::resize_to_base64(file_path, constants::DEFAULT_EMBEDDING_RESIZE)?;
+
+    let vector = client.embed_image(&base64).await?;
+    log_info(&format!("向量维数: {}", vector.len()));
+
+    let metadata = serde_json::json!({
+        "file_path": file_path,
+        "file_name": file_name,
+        "file_size": file_size,
+        "modified_at": modified_at,
+        "file_hash": file_hash,
+        "file_type": "image",
+        "thumbnail_path": thumbnail_path,
+        "exif": serde_json::to_value(&exif).unwrap_or_default(),
+        "chunk_index": 0,
+        "total_chunks": 1,
+    });
+
+    Ok(vec![crate::vector_store::VectorEntry {
+        id: file_hash.clone(),
+        vector,
+        metadata,
+    }])
+}
+
+async fn process_text_file(
+    client: &embedding::ApiClient,
+    file_path: &str,
+    file_name: &str,
+    file_size: u64,
+    modified_at: u64,
+    chunk_size: usize,
+    chunk_overlap: usize,
+) -> Result<Vec<crate::vector_store::VectorEntry>, String> {
+    log_info(&format!("处理文本: {}", file_path));
+
+    let content = std::fs::read_to_string(file_path)
+        .map_err(|e| format!("读取文件失败: {}", e))?;
+
+    let chunks = text_chunker::chunk_text(&content, chunk_size, chunk_overlap);
+
+    if chunks.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let total_chunks = chunks.len();
+    let mut entries = Vec::with_capacity(total_chunks);
+
+    for (idx, chunk) in chunks.iter().enumerate() {
+        let vector = client.embed_text(chunk).await?;
+        log_info(&format!("文本 chunk {} 向量维数: {}", idx, vector.len()));
+
+        let entry_id = format!("{}__chunk_{}", file_path, idx);
+
+        entries.push(crate::vector_store::VectorEntry {
+            id: entry_id,
+            vector,
+            metadata: serde_json::json!({
+                "file_path": file_path,
+                "file_name": file_name,
+                "file_size": file_size,
+                "modified_at": modified_at,
+                "file_type": "text",
+                "chunk_index": idx,
+                "total_chunks": total_chunks,
+                "chunk_text": chunk,
+            }),
+        });
+    }
+
+    Ok(entries)
+}

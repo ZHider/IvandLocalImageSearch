@@ -1,5 +1,6 @@
 use rusqlite::{params, Connection, Result};
 use std::path::PathBuf;
+use crate::file_utils;
 
 pub struct IndexMeta {
     pub file_path: String,
@@ -7,25 +8,12 @@ pub struct IndexMeta {
     #[allow(dead_code)]
     pub indexed_at: String,
 }
-
 pub fn get_db_path() -> PathBuf {
-    std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("data")
-        .join("index.db")
-}
-
-fn ensure_data_dir() {
-    let data_dir = std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join("data");
-    if !data_dir.exists() {
-        std::fs::create_dir_all(&data_dir).ok();
-    }
+    file_utils::get_data_dir().join("index.db")
 }
 
 fn open_db() -> Result<Connection> {
-    ensure_data_dir();
+    file_utils::ensure_data_dir().ok();
     let db_path = get_db_path();
     let conn = Connection::open(db_path)?;
     conn.execute_batch(

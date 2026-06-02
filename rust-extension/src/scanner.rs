@@ -14,28 +14,11 @@ pub struct FileEntry {
     pub file_hash: String,
 }
 
-const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "gif", "bmp", "webp"];
-const TEXT_EXTENSIONS: &[&str] = &["txt", "md"];
+use crate::file_utils;
 
 fn is_valid_file(path: &Path) -> bool {
-    if !path.is_file() {
-        return false;
-    }
-
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase());
-
-    match ext {
-        Some(ref e) => {
-            IMAGE_EXTENSIONS.contains(&e.as_str())
-                || TEXT_EXTENSIONS.contains(&e.as_str())
-        }
-        None => false,
-    }
+    file_utils::is_valid_file(path)
 }
-
 pub struct ScanResult {
     pub files: Vec<FileEntry>,
     pub total: usize,

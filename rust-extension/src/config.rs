@@ -1,5 +1,6 @@
 use std::io::Read;
 use serde::{Deserialize, Serialize};
+use crate::file_utils;
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct AppConfig {
@@ -16,22 +17,12 @@ pub struct AppConfig {
     #[serde(rename = "customEmbeddingPath", default)]
     pub custom_embedding_path: Option<String>,
 }
-
 pub fn get_config_path() -> std::path::PathBuf {
-    std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join("data")
-        .join("config.json")
+    file_utils::get_data_dir().join("config.json")
 }
 
 pub fn ensure_data_dir() -> std::io::Result<()> {
-    let data_dir = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join("data");
-    if !data_dir.exists() {
-        std::fs::create_dir_all(&data_dir)?;
-    }
-    Ok(())
+    file_utils::ensure_data_dir()
 }
 
 pub fn save_config_to_file(config: AppConfig) -> Result<String, String> {

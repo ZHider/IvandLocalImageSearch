@@ -1,4 +1,6 @@
 mod config;
+mod constants;
+mod file_utils;
 mod embedding;
 mod events;
 mod hasher;
@@ -164,6 +166,14 @@ async fn main() {
                                 }
                                 "getThumbnail" => {
                                     events::handle_get_thumbnail(
+                                        &conn.token,
+                                        incoming.data.unwrap_or(serde_json::json!({})),
+                                        &mut conn.write,
+                                    )
+                                    .await;
+                                }
+                                "getPreview" => {
+                                    events::handle_get_preview(
                                         &conn.token,
                                         incoming.data.unwrap_or(serde_json::json!({})),
                                         &mut conn.write,
