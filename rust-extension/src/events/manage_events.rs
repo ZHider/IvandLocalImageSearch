@@ -1,4 +1,4 @@
-//! 索引管理事件：清空、查询、选择性删除。
+//! 索引管理事件：清空、查询、选择性删除、优化。
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -232,6 +232,72 @@ pub async fn handle_delete_index_entries(token: &str, data: Value, write: &mut W
             "success": true,
             "deleted": del.file_paths.len(),
         }),
+        write,
+    )
+    .await;
+}
+
+/// 手动触发 LanceDB 优化（压缩文件 + 清理旧版本）
+pub async fn handle_optimize_index(token: &str, write: &mut WsWriter) {
+    log_info("处理 optimizeIndex 事件");
+
+    // 发送开始进度
+    let _ = ws_client::send_broadcast(
+        token,
+        "optimizeIndexProgress",
+        serde_json::json!({ "message": "正在启动优化..." }),
+        write,
+    )
+    .await;
+
+    // 初始化向量存储
+    let store = match VectorStore::init().await {
+        Ok(s) => s,
+        Err(e) => {
+            log_error(&format!("初始化向量存储失败: {}", e));
+            let _ = ws_client::send_broadcast(
+                token,
+                "optimizeIndexError",
+                serde_json::json!({ "error": e }),
+                write,
+            )
+            .await;
+            return;
+        }
+    };
+
+    // 执行文件压缩
+    let _ = ws_client::send_broadcast(
+        token,
+        "optimizeIndexProgress",
+        serde_json::json!({ "message": "正在压缩文件..." }),
+        write,
+    )
+    .await;
+
+    if let Err(e) = store.compact_files().await {
+        log_info(&format!("文件压缩提示: {}", e));
+    }
+
+    // 执行版本清理
+    let _ = ws_client::send_broadcast(
+        token,
+        "optimizeIndexProgress",
+        serde_json::json!({ "message": "正在清理旧版本..." }),
+        write,
+    )
+    .await;
+
+    if let Err(e) = store.cleanup_old_versions().await {
+        log_info(&format!("版本清理提示: {}", e));
+    }
+
+    log_info("LanceDB 表优化完成");
+
+    let _ = ws_client::send_broadcast(
+        token,
+        "optimizeIndexComplete",
+        serde_json::json!({ "success": true }),
         write,
     )
     .await;

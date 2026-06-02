@@ -10,6 +10,8 @@ const queryError = ref<string | null>(null)
 const queryTotal = ref(0)
 const page = ref(1)
 const pageSize = ref(50)
+const optimizing = ref(false)
+const optimizeMessage = ref('')
 
 let initialized = false
 
@@ -71,6 +73,25 @@ export function useIndexManage() {
       const d = data as { error: string }
       managing.value = false
       message.error(`删除索引失败: ${d.error}`)
+    })
+
+    on('optimizeIndexProgress', (data: unknown) => {
+      const d = data as { message: string }
+      optimizing.value = true
+      optimizeMessage.value = d.message || '正在优化...'
+    })
+
+    on('optimizeIndexComplete', () => {
+      optimizing.value = false
+      optimizeMessage.value = ''
+      message.success('索引优化完成')
+    })
+
+    on('optimizeIndexError', (data: unknown) => {
+      const d = data as { error: string }
+      optimizing.value = false
+      optimizeMessage.value = ''
+      message.error(`索引优化失败: ${d.error}`)
     })
   }
 
@@ -135,6 +156,12 @@ export function useIndexManage() {
     return selectedFilePaths.value.has(filePath)
   }
 
+  function optimizeIndex() {
+    optimizing.value = true
+    optimizeMessage.value = '正在启动优化...'
+    send('optimizeIndex')
+  }
+
   return {
     managing,
     files,
@@ -143,6 +170,8 @@ export function useIndexManage() {
     queryError,
     page,
     pageSize,
+    optimizing,
+    optimizeMessage,
     clearIndex,
     queryIndex,
     setPage,
@@ -151,5 +180,6 @@ export function useIndexManage() {
     toggleFile,
     toggleAll,
     isSelected,
+    optimizeIndex,
   }
 }

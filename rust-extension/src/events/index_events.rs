@@ -276,6 +276,8 @@ struct ProcessResult {
 }
 
 /// 批量处理增量文件（嵌入并写入向量存储）
+/// 优化：攒够一批再统一写入 LanceDB，避免每条数据都触发一次独立的数据库事务
+/// 一致性保证：metadata 和向量数据在同一个批次中同时提交，避免不一致
 async fn process_incremental_files(
     token: &str,
     write: &mut WsWriter,
@@ -295,6 +297,10 @@ async fn process_incremental_files(
     let mut indexed_any = false;
     let chunk_size = constants::DEFAULT_CHUNK_SIZE;
     let chunk_overlap = constants::DEFAULT_CHUNK_OVERLAP;
+    let batch_size = constants::BATCH_WRITE_SIZE;
+    let mut batch_buffer: Vec<crate::vector_store::VectorEntry> = Vec::with_capacity(batch_size);
+    // 待确认的文件元数据队列：批量写入成功后才写入 SQLite
+    let mut pending_meta: Vec<(String, String)> = Vec::with_capacity(batch_size);
 
     for entry in incremental {
         current_step += 1;
@@ -336,24 +342,20 @@ async fn process_incremental_files(
                 Ok(entries) => {
                     let dim = entries.first().map(|e| e.vector.len()).unwrap_or(0);
                     log_info(&format!(
-                        "batch_upsert 图片 {} 向量维数: {}",
+                        "处理图片 {} 向量维数: {}",
                         entry.file_path, dim
                     ));
-                    if let Err(e) = store.batch_upsert(&entries).await {
-                        error_count += 1;
-                        log_error(&format!("写入向量存储失败 {}: {}", entry.file_path, e));
-                    } else {
-                        indexed_any = true;
-                        for _ve in &entries {
-                            processed_files.push(serde_json::json!({
-                                "file_path": entry.file_path,
-                                "file_size": entry.file_size,
-                                "modified_at": entry.modified_at,
-                                "file_hash": entry.file_hash,
-                            }));
-                        }
-                        metadata::insert_meta(&entry.file_path, &entry.file_hash, now).ok();
+                    let file_entry_count = entries.len();
+                    batch_buffer.extend(entries);
+                    for _ in 0..file_entry_count {
+                        processed_files.push(serde_json::json!({
+                            "file_path": entry.file_path,
+                            "file_size": entry.file_size,
+                            "modified_at": entry.modified_at,
+                            "file_hash": entry.file_hash,
+                        }));
                     }
+                    pending_meta.push((entry.file_path.clone(), entry.file_hash.clone()));
                 }
                 Err(e) => {
                     error_count += 1;
@@ -373,21 +375,17 @@ async fn process_incremental_files(
             .await
             {
                 Ok(entries) => {
-                    if let Err(e) = store.batch_upsert(&entries).await {
-                        error_count += 1;
-                        log_error(&format!("写入向量存储失败 {}: {}", entry.file_path, e));
-                    } else {
-                        indexed_any = true;
-                        for _ve in &entries {
-                            processed_files.push(serde_json::json!({
-                                "file_path": entry.file_path,
-                                "file_size": entry.file_size,
-                                "modified_at": entry.modified_at,
-                                "file_hash": entry.file_hash,
-                            }));
-                        }
-                        metadata::insert_meta(&entry.file_path, &entry.file_hash, now).ok();
+                    let file_entry_count = entries.len();
+                    batch_buffer.extend(entries);
+                    for _ in 0..file_entry_count {
+                        processed_files.push(serde_json::json!({
+                            "file_path": entry.file_path,
+                            "file_size": entry.file_size,
+                            "modified_at": entry.modified_at,
+                            "file_hash": entry.file_hash,
+                        }));
                     }
+                    pending_meta.push((entry.file_path.clone(), entry.file_hash.clone()));
                 }
                 Err(e) => {
                     error_count += 1;
@@ -395,6 +393,46 @@ async fn process_incremental_files(
                 }
             }
         }
+
+        // 缓冲区达到阈值时，统一写入
+        if batch_buffer.len() >= batch_size {
+            let count = batch_buffer.len();
+            let meta_snapshot = pending_meta.clone();
+            let meta_now = now.to_string();
+
+            if let Err(e) = store.batch_upsert(&batch_buffer).await {
+                error_count += 1;
+                log_error(&format!("批量写入向量存储失败（{} 条）: {}", count, e));
+            } else {
+                indexed_any = true;
+                log_info(&format!("批量写入完成，{} 条向量", count));
+                for (path, hash) in &meta_snapshot {
+                    metadata::insert_meta(path, hash, &meta_now).ok();
+                }
+            }
+            batch_buffer.clear();
+            pending_meta.clear();
+        }
+    }
+
+    // 写入剩余的条目
+    if !batch_buffer.is_empty() {
+        let count = batch_buffer.len();
+        let meta_snapshot = pending_meta.clone();
+        let meta_now = now.to_string();
+
+        if let Err(e) = store.batch_upsert(&batch_buffer).await {
+            error_count += 1;
+            log_error(&format!("批量写入向量存储失败（{} 条）: {}", count, e));
+        } else {
+            indexed_any = true;
+            log_info(&format!("批量写入完成（最后一批），{} 条向量", count));
+            for (path, hash) in &meta_snapshot {
+                metadata::insert_meta(path, hash, &meta_now).ok();
+            }
+        }
+        batch_buffer.clear();
+        pending_meta.clear();
     }
 
     ProcessResult {
@@ -569,6 +607,9 @@ pub async fn handle_start_index(token: &str, data: Value, write: &mut WsWriter) 
         &proc_result,
     )
     .await;
+
+    // 阶段 7：优化 LanceDB 表（压缩文件、清理旧版本）
+    optimize_lancedb(token, write, &ctx.store).await;
 }
 
 // ---- 阶段 6：完成索引 ----
@@ -621,6 +662,54 @@ async fn finalize_indexing(
         write,
     )
     .await;
+}
+
+// ---- 阶段 7：优化 LanceDB ----
+
+async fn optimize_lancedb(token: &str, write: &mut WsWriter, store: &VectorStore) {
+    log_info("开始阶段 7：优化 LanceDB 表……");
+
+    send_progress(
+        token,
+        write,
+        "optimizing",
+        0,
+        3,
+        Some(serde_json::json!({ "message": "正在压缩文件..." })),
+    )
+    .await;
+
+    // 1. 压缩文件
+    if let Err(e) = store.compact_files().await {
+        log_info(&format!("文件压缩提示: {}", e));
+    }
+
+    send_progress(
+        token,
+        write,
+        "optimizing",
+        1,
+        3,
+        Some(serde_json::json!({ "message": "正在清理旧版本..." })),
+    )
+    .await;
+
+    // 2. 清理旧版本
+    if let Err(e) = store.cleanup_old_versions().await {
+        log_info(&format!("版本清理提示: {}", e));
+    }
+
+    send_progress(
+        token,
+        write,
+        "optimizing",
+        2,
+        2,
+        Some(serde_json::json!({ "message": "优化完成" })),
+    )
+    .await;
+
+    log_info("阶段 7 完成：LanceDB 表优化结束");
 }
 
 // ---- 文件处理器 ----

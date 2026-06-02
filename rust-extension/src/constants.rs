@@ -20,3 +20,7 @@ pub const DEFAULT_TOP_K: usize = 50;
 
 // ---- 缓冲区 ----
 pub const HASH_BUF_SIZE: usize = 65536;
+
+/// 批量写入 LanceDB 的条目数阈值
+/// 攒够这么多条再统一写入，减少小文件生成和事务开销
+pub const BATCH_WRITE_SIZE: usize = 50;

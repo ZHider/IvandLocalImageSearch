@@ -121,6 +121,9 @@ impl EventDispatcher {
             "deleteIndexEntries" => {
                 crate::events::handle_delete_index_entries(token, data, write).await;
             }
+            "optimizeIndex" => {
+                crate::events::handle_optimize_index(token, write).await;
+            }
             "getPreview" => {
                 crate::events::handle_get_preview(token, data, write).await;
             }

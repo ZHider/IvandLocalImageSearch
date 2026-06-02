@@ -101,10 +101,31 @@ const columns: DataTableColumn[] = [
       >
         删除选中
       </n-button>
+      <n-button
+        type="info"
+        @click="manage.optimizeIndex()"
+        :loading="manage.optimizing.value"
+        :disabled="manage.optimizing.value"
+      >
+        ⚡ 优化索引（压缩 + 清理）
+      </n-button>
       <n-tag v-if="manage.queryTotal.value > 0">
         共 {{ manage.queryTotal.value }} 条
       </n-tag>
     </n-space>
+
+    <!-- 优化进度 -->
+    <n-progress
+      v-if="manage.optimizing.value"
+      type="line"
+      :percentage="100"
+      :indicator-placement="'inside'"
+      :height="24"
+      :border-radius="4"
+      :processing="true"
+    >
+      {{ manage.optimizeMessage.value }}
+    </n-progress>
 
     <!-- 数据表 -->
     <n-data-table

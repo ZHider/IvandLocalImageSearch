@@ -29,6 +29,10 @@ fn log_info(msg: &str) {
     log("INFO", msg);
 }
 
+fn log_warn(msg: &str) {
+    log("WARN", msg);
+}
+
 fn log_error(msg: &str) {
     log("ERROR", msg);
 }
