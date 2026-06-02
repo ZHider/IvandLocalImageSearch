@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import type { AppConfig } from '../types'
-import { DEFAULT_NATIVE_EXTENSIONS } from '../types'
 
 const props = defineProps<{
   config: AppConfig
