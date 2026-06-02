@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 
+use anyhow::Context;
+use futures_util::StreamExt;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -23,14 +25,16 @@ use super::config_to_api_config;
 #[derive(Deserialize)]
 struct StartIndexData {
     folders: Vec<String>,
+    #[serde(default = "default_embed_threads")]
+    embed_threads: usize,
+}
+
+fn default_embed_threads() -> usize {
+    constants::DEFAULT_EMBED_THREADS
 }
 
 fn is_image_file(path: &str) -> bool {
     file_utils::is_image_file(path)
-}
-
-fn is_text_file(path: &str) -> bool {
-    file_utils::is_text_file(path)
 }
 
 // ---- 进度广播辅助函数 ----
@@ -77,9 +81,14 @@ struct IndexingContext {
     client: embedding::ApiClient,
     store: VectorStore,
     now: String,
+    advanced_options: config::AdvancedOptions,
 }
 
-async fn load_indexing_config(token: &str, write: &mut WsWriter) -> Result<IndexingContext, ()> {
+async fn load_indexing_config(
+    token: &str,
+    write: &mut WsWriter,
+    embed_threads: usize,
+) -> Result<IndexingContext, ()> {
     let app_config = match config::load_config_from_file() {
         Ok(c) => c,
         Err(e) => {
@@ -95,6 +104,19 @@ async fn load_indexing_config(token: &str, write: &mut WsWriter) -> Result<Index
         }
     };
 
+    // 验证配置参数
+    if let Err(e) = app_config.validate() {
+        log_error(&format!("配置验证失败: {}", e));
+        let _ = ws_client::send_broadcast(
+            token,
+            "indexError",
+            serde_json::json!({ "error": e.to_string() }),
+            write,
+        )
+        .await;
+        return Err(());
+    }
+
     let img_opts = image_processing::ProcessingOptions::from(&app_config.image_processing);
 
     let api_config = config_to_api_config(&app_config);
@@ -102,6 +124,7 @@ async fn load_indexing_config(token: &str, write: &mut WsWriter) -> Result<Index
         "使用 provider={}, base_url={}, model={}",
         api_config.provider, api_config.base_url, api_config.model
     ));
+    log_info(&format!("使用并发线程数: {}", embed_threads));
 
     let client = match create_client(&api_config) {
         Ok(c) => c,
@@ -110,7 +133,7 @@ async fn load_indexing_config(token: &str, write: &mut WsWriter) -> Result<Index
             let _ = ws_client::send_broadcast(
                 token,
                 "indexError",
-                serde_json::json!({ "error": e }),
+                serde_json::json!({ "error": e.to_string() }),
                 write,
             )
             .await;
@@ -125,7 +148,7 @@ async fn load_indexing_config(token: &str, write: &mut WsWriter) -> Result<Index
             let _ = ws_client::send_broadcast(
                 token,
                 "indexError",
-                serde_json::json!({ "error": e }),
+                serde_json::json!({ "error": e.to_string() }),
                 write,
             )
             .await;
@@ -142,6 +165,7 @@ async fn load_indexing_config(token: &str, write: &mut WsWriter) -> Result<Index
         client,
         store,
         now,
+        advanced_options: app_config.advanced_options,
     })
 }
 
@@ -160,7 +184,7 @@ async fn perform_scan(
             let _ = ws_client::send_broadcast(
                 token,
                 "indexError",
-                serde_json::json!({ "error": e }),
+                serde_json::json!({ "error": e.to_string() }),
                 write,
             )
             .await;
@@ -276,8 +300,8 @@ struct ProcessResult {
 }
 
 /// 批量处理增量文件（嵌入并写入向量存储）
-/// 优化：攒够一批再统一写入 LanceDB，避免每条数据都触发一次独立的数据库事务
-/// 一致性保证：metadata 和向量数据在同一个批次中同时提交，避免不一致
+/// 优化1：攒够一批再统一写入 LanceDB，避免每条数据都触发一次独立的数据库事务
+/// 优化2：使用 embed_threads 控制 embedding API 的并发请求数
 async fn process_incremental_files(
     token: &str,
     write: &mut WsWriter,
@@ -291,6 +315,8 @@ async fn process_incremental_files(
     deleted_count: usize,
     now: &str,
     opts: &image_processing::ProcessingOptions,
+    embed_threads: usize,
+    advanced_options: &config::AdvancedOptions,
 ) -> ProcessResult {
     let mut processed_files: Vec<serde_json::Value> = Vec::new();
     let mut error_count = 0u32;
@@ -299,11 +325,63 @@ async fn process_incremental_files(
     let chunk_overlap = constants::DEFAULT_CHUNK_OVERLAP;
     let batch_size = constants::BATCH_WRITE_SIZE;
     let mut batch_buffer: Vec<crate::vector_store::VectorEntry> = Vec::with_capacity(batch_size);
-    // 待确认的文件元数据队列：批量写入成功后才写入 SQLite
     let mut pending_meta: Vec<(String, String)> = Vec::with_capacity(batch_size);
+    let threads = embed_threads.max(constants::MIN_EMBED_THREADS);
 
-    for entry in incremental {
+    // 构建所有文件的并发 futures
+    let futures = incremental.iter().map(|entry| {
+        let client = client;
+        let entry_path = entry.file_path.clone();
+        let file_name = std::path::Path::new(&entry.file_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+        let is_img = is_image_file(&entry.file_path);
+        let file_size = entry.file_size;
+        let modified_at = entry.modified_at;
+        let file_hash = entry.file_hash.clone();
+        let chunk_size = chunk_size;
+        let chunk_overlap = chunk_overlap;
+        let opts = opts;
+        let advanced_options = advanced_options;
+
+        async move {
+            if is_img {
+                let result = process_image_file(
+                    client,
+                    &entry_path,
+                    &file_name,
+                    file_size,
+                    modified_at,
+                    file_hash.clone(),
+                    opts,
+                    advanced_options,
+                )
+                .await;
+                (entry_path, file_size, modified_at, file_hash, result)
+            } else {
+                let result = process_text_file(
+                    client,
+                    &entry_path,
+                    &file_name,
+                    file_size,
+                    modified_at,
+                    chunk_size,
+                    chunk_overlap,
+                )
+                .await;
+                (entry_path, file_size, modified_at, file_hash, result)
+            }
+        }
+    });
+
+    // 流式并发执行：完成一个就处理一个，不等待全部完成
+    let mut stream = futures_util::stream::iter(futures).buffer_unordered(threads);
+
+    while let Some((file_path, file_size, modified_at, file_hash, result)) = stream.next().await {
         current_step += 1;
+
 
         send_progress(
             token,
@@ -312,7 +390,7 @@ async fn process_incremental_files(
             current_step,
             total_steps,
             Some(serde_json::json!({
-                "currentFile": entry.file_path,
+                "currentFile": file_path,
                 "newCount": new_count,
                 "modifiedCount": modified_count,
                 "deletedCount": deleted_count,
@@ -321,80 +399,32 @@ async fn process_incremental_files(
         )
         .await;
 
-        let file_name = std::path::Path::new(&entry.file_path)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("")
-            .to_string();
-
-        if is_image_file(&entry.file_path) {
-            match process_image_file(
-                client,
-                &entry.file_path,
-                &file_name,
-                entry.file_size,
-                entry.modified_at,
-                entry.file_hash.clone(),
-                opts,
-            )
-            .await
-            {
-                Ok(entries) => {
-                    let dim = entries.first().map(|e| e.vector.len()).unwrap_or(0);
-                    log_info(&format!(
-                        "处理图片 {} 向量维数: {}",
-                        entry.file_path, dim
-                    ));
-                    let file_entry_count = entries.len();
-                    batch_buffer.extend(entries);
-                    for _ in 0..file_entry_count {
-                        processed_files.push(serde_json::json!({
-                            "file_path": entry.file_path,
-                            "file_size": entry.file_size,
-                            "modified_at": entry.modified_at,
-                            "file_hash": entry.file_hash,
-                        }));
-                    }
-                    pending_meta.push((entry.file_path.clone(), entry.file_hash.clone()));
+        match result {
+            Ok(entries) => {
+                let dim = entries.first().map(|e| e.vector.len()).unwrap_or(0);
+                log_info(&format!(
+                    "处理文件 {} 向量维数: {}",
+                    file_path, dim
+                ));
+                let file_entry_count = entries.len();
+                batch_buffer.extend(entries);
+                for _ in 0..file_entry_count {
+                    processed_files.push(serde_json::json!({
+                        "file_path": file_path,
+                        "file_size": file_size,
+                        "modified_at": modified_at,
+                        "file_hash": file_hash,
+                    }));
                 }
-                Err(e) => {
-                    error_count += 1;
-                    log_error(&format!("处理图片失败 {}: {}", entry.file_path, e));
-                }
+                pending_meta.push((file_path.clone(), file_hash.clone()));
             }
-        } else if is_text_file(&entry.file_path) {
-            match process_text_file(
-                client,
-                &entry.file_path,
-                &file_name,
-                entry.file_size,
-                entry.modified_at,
-                chunk_size,
-                chunk_overlap,
-            )
-            .await
-            {
-                Ok(entries) => {
-                    let file_entry_count = entries.len();
-                    batch_buffer.extend(entries);
-                    for _ in 0..file_entry_count {
-                        processed_files.push(serde_json::json!({
-                            "file_path": entry.file_path,
-                            "file_size": entry.file_size,
-                            "modified_at": entry.modified_at,
-                            "file_hash": entry.file_hash,
-                        }));
-                    }
-                    pending_meta.push((entry.file_path.clone(), entry.file_hash.clone()));
-                }
-                Err(e) => {
-                    error_count += 1;
-                    log_error(&format!("处理文本失败 {}: {}", entry.file_path, e));
-                }
+            Err(e) => {
+                error_count += 1;
+                log_error(&format!("处理文件失败 {}: {}", file_path, e));
             }
         }
 
-        // 缓冲区达到阈值时，统一写入
+        // 缓冲区达到阈值时，统一写入 LanceDB
         if batch_buffer.len() >= batch_size {
             let count = batch_buffer.len();
             let meta_snapshot = pending_meta.clone();
@@ -519,8 +549,8 @@ pub async fn handle_start_index(token: &str, data: Value, write: &mut WsWriter) 
         return;
     }
 
-    // 阶段 1：加载配置
-    let mut ctx = match load_indexing_config(token, write).await {
+    // 阶段 1：加载配置（直接传入前端传来的线程数）
+    let mut ctx = match load_indexing_config(token, write, index_data.embed_threads).await {
         Ok(c) => c,
         Err(()) => return,
     };
@@ -577,6 +607,8 @@ pub async fn handle_start_index(token: &str, data: Value, write: &mut WsWriter) 
         deleted_count,
         &ctx.now,
         &ctx.img_opts,
+        index_data.embed_threads,
+        &ctx.advanced_options,
     )
     .await;
 
@@ -714,6 +746,51 @@ async fn optimize_lancedb(token: &str, write: &mut WsWriter, store: &VectorStore
 
 // ---- 文件处理器 ----
 
+/// 解码图片并生成缩略图，返回 (解码后的图片, 缩略图路径)
+fn decode_and_generate_thumbnail(
+    file_path: &str,
+    file_hash: &str,
+    thumbnail_size: u32,
+) -> anyhow::Result<(image::DynamicImage, String)> {
+    let img = image_processing::open_image(file_path)
+        .map_err(|e| anyhow::anyhow!("解码图片失败 ({}): {}", file_path, e))?;
+    let thumb = image_processing::generate_thumbnail_from_img(&img, file_hash, thumbnail_size)
+        .unwrap_or_default();
+    Ok((img, thumb))
+}
+
+/// 根据高级选项决定 embedding 用图片的路径：
+/// - 原生格式小文件直接发送原文件
+/// - 否则缩放并转为 WebP 缓存再发送
+fn resolve_embed_path(
+    img: &image::DynamicImage,
+    file_path: &str,
+    file_hash: &str,
+    file_size: u64,
+    embed_image_size: u32,
+    advanced_options: &config::AdvancedOptions,
+) -> anyhow::Result<String> {
+    let is_heic = matches!(
+        std::path::Path::new(file_path)
+            .extension()
+            .and_then(|e| e.to_str()),
+        Some("heic" | "heif")
+    );
+
+    let should_convert = advanced_options.should_convert_to_webp(file_path, file_size);
+
+    if should_convert {
+        let quality = if is_heic {
+            constants::HEIC_TO_WEBP_QUALITY
+        } else {
+            constants::DEFAULT_WEBP_QUALITY
+        };
+        image_processing::convert_img_to_webp(img, file_hash, embed_image_size, quality)
+    } else {
+        Ok(file_path.to_string())
+    }
+}
+
 async fn process_image_file(
     client: &embedding::ApiClient,
     file_path: &str,
@@ -722,36 +799,25 @@ async fn process_image_file(
     modified_at: u64,
     file_hash: String,
     opts: &image_processing::ProcessingOptions,
-) -> Result<Vec<crate::vector_store::VectorEntry>, String> {
+    advanced_options: &config::AdvancedOptions,
+) -> anyhow::Result<Vec<crate::vector_store::VectorEntry>> {
     log_info(&format!("process_image_file: 开始处理 {}", file_path));
     let exif = image_processing::extract_exif(file_path).unwrap_or_default();
 
-    let is_heic = matches!(
-        std::path::Path::new(file_path)
-            .extension()
-            .and_then(|e| e.to_str()),
-        Some("heic" | "heif")
-    );
+    let (img, thumbnail_path) = decode_and_generate_thumbnail(
+        file_path,
+        &file_hash,
+        opts.thumbnail_size,
+    )?;
 
-    let (thumbnail_path, embed_path) = if is_heic {
-        // HEIC: 解码一次，同时用于缩略图 + WebP 缓存（避免重复解码 24MP）
-        let img = image_processing::open_image(file_path)
-            .map_err(|e| format!("解码 HEIC 失败: {}", e))?;
-        let thumb =
-            image_processing::generate_thumbnail_from_img(&img, &file_hash, opts.thumbnail_size)
-                .unwrap_or_default();
-        let webp = image_processing::convert_img_to_webp(
-            &img,
-            &file_hash,
-            opts.embed_image_size,
-            constants::HEIC_TO_WEBP_QUALITY,
-        )?;
-        (thumb, webp)
-    } else {
-        let thumb = image_processing::generate_thumbnail(file_path, opts.thumbnail_size)
-            .unwrap_or_default();
-        (thumb, file_path.to_string())
-    };
+    let embed_path = resolve_embed_path(
+        &img,
+        file_path,
+        &file_hash,
+        file_size,
+        opts.embed_image_size,
+        advanced_options,
+    )?;
 
     log_info(&format!(
         "process_image_file: 缩略图路径={}",
@@ -795,10 +861,11 @@ async fn process_text_file(
     modified_at: u64,
     chunk_size: usize,
     chunk_overlap: usize,
-) -> Result<Vec<crate::vector_store::VectorEntry>, String> {
+) -> anyhow::Result<Vec<crate::vector_store::VectorEntry>> {
     log_info(&format!("处理文本: {}", file_path));
 
-    let content = std::fs::read_to_string(file_path).map_err(|e| format!("读取文件失败: {}", e))?;
+    let content = std::fs::read_to_string(file_path)
+        .context("读取文件失败")?;
 
     let chunks = text_chunker::chunk_text(&content, chunk_size, chunk_overlap);
 

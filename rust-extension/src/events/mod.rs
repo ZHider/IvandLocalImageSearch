@@ -46,6 +46,7 @@ pub(crate) fn config_to_api_config(config: &AppConfig) -> ApiConfig {
         base_url,
         api_key: config.api_key.clone(),
         model: config.model_name.clone(),
+        extra_embedding_params: config.advanced_options.extra_embedding_params.clone(),
     }
 }
 

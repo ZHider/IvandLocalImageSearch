@@ -16,6 +16,11 @@ pub const DEFAULT_EMBEDDING_RESIZE: u32 = 1920;
 pub const DEFAULT_WEBP_QUALITY: f32 = 80.0;
 /// HEIC 转 WebP 编码质量 (0-100)
 pub const HEIC_TO_WEBP_QUALITY: f32 = 90.0;
+
+/// WebP 压缩阈值 (MB)
+pub const DEFAULT_WEBP_THRESHOLD_MB: f64 = 4.0;
+/// 模型原生支持的后缀名（不需要转为 WebP 即可发送的格式）
+pub const DEFAULT_NATIVE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "bmp", "tiff", "ico"];
 pub const DEFAULT_TOP_K: usize = 50;
 
 // ---- 缓冲区 ----
@@ -24,3 +29,11 @@ pub const HASH_BUF_SIZE: usize = 65536;
 /// 批量写入 LanceDB 的条目数阈值
 /// 攒够这么多条再统一写入，减少小文件生成和事务开销
 pub const BATCH_WRITE_SIZE: usize = 50;
+
+// ---- Embedding 并发控制 ----
+/// 最小并发线程数
+pub const MIN_EMBED_THREADS: usize = 1;
+/// 最大并发线程数
+pub const MAX_EMBED_THREADS: usize = 16;
+/// 默认并发线程数
+pub const DEFAULT_EMBED_THREADS: usize = 1;

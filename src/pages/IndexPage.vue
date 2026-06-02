@@ -66,7 +66,7 @@ function handleStartIndex() {
     message.warning('请先添加要索引的文件夹')
     return
   }
-  startIndex(config.value.folders)
+  startIndex(config.value.folders, config.value.embedThreads)
 }
 </script>
 

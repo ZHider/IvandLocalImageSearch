@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::{Context, Result};
 use arrow_array::types::Float32Type;
 use arrow_array::{FixedSizeListArray, Float32Array, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema};
@@ -71,10 +72,8 @@ fn make_schema(vector_dim: i32) -> Arc<Schema> {
 }
 
 /// Build a RecordBatch from `VectorEntry` items.
-fn entries_to_batch(entries: &[VectorEntry]) -> Result<RecordBatch, String> {
-    if entries.is_empty() {
-        return Err("entries_to_batch: empty slice".into());
-    }
+fn entries_to_batch(entries: &[VectorEntry]) -> Result<RecordBatch> {
+    anyhow::ensure!(!entries.is_empty(), "entries_to_batch: empty slice");
     let dim = entries[0].vector.len() as i32;
     log_info(&format!(
         "entries_to_batch: 条目数 {}, 向量维数 {}",
@@ -136,7 +135,7 @@ fn entries_to_batch(entries: &[VectorEntry]) -> Result<RecordBatch, String> {
             Arc::new(StringArray::from(metadata_json)),
         ],
     )
-    .map_err(|e| format!("创建 RecordBatch 失败: {}", e))?;
+    .context("创建 RecordBatch 失败")?;
 
     Ok(batch)
 }
@@ -160,7 +159,7 @@ pub struct VectorStore {
 impl VectorStore {
     /// Open (or lazily create on first write) the LanceDB database.
     /// 优化：配置写入参数以减少小文件生成
-    pub async fn init() -> Result<Self, String> {
+    pub async fn init() -> Result<Self> {
         let uri = std::env::current_dir()
             .unwrap_or_else(|_| std::path::PathBuf::from("."))
             .join(DB_DIR)
@@ -172,7 +171,7 @@ impl VectorStore {
         let db = lancedb::connect(&uri)
             .execute()
             .await
-            .map_err(|e| format!("连接 LanceDB 失败: {}", e))?;
+            .context("连接 LanceDB 失败")?;
 
         let exists = db.open_table(VECTOR_TABLE).execute().await.is_ok();
         if exists {
@@ -187,12 +186,12 @@ impl VectorStore {
         })
     }
 
-    async fn open_table(&self) -> Result<lancedb::Table, String> {
+    async fn open_table(&self) -> Result<lancedb::Table> {
         self.db
             .open_table(VECTOR_TABLE)
             .execute()
             .await
-            .map_err(|e| format!("打开表 {} 失败: {}", VECTOR_TABLE, e))
+            .with_context(|| format!("打开表 {} 失败", VECTOR_TABLE))
     }
 
     /// Batch upsert entries.  Uses `merge_insert` on the `id` column so
@@ -202,7 +201,7 @@ impl VectorStore {
     /// 1. 针对 exFAT 文件系统添加了重试机制
     /// 2. 使用 WriteMode::Create 替代 merge_insert 来减少碎片（首次创建时）
     /// 3. 控制写入批次大小，避免生成过多小文件
-    pub async fn batch_upsert(&mut self, entries: &[VectorEntry]) -> Result<(), String> {
+    pub async fn batch_upsert(&mut self, entries: &[VectorEntry]) -> Result<()> {
         if entries.is_empty() {
             return Ok(());
         }
@@ -214,26 +213,16 @@ impl VectorStore {
         let mut last_error = String::new();
 
         for attempt in 1..=max_retries {
-            let result = if !self.table_exists {
+            let result: Result<()> = if !self.table_exists {
                 // First insert → create the table with optimized write params
                 self.db
                     .create_table(VECTOR_TABLE, batch.clone())
                     .execute()
                     .await
-                    .map_err(|e| {
-                        let err = format!("创建表 {} 失败: {}", VECTOR_TABLE, e);
-                        log_error(&err);
-                        err
-                    })
+                    .map_err(|e| anyhow::anyhow!("创建表 {} 失败: {}", VECTOR_TABLE, e))
                     .map(|_| ())
             } else {
-                let tbl = match self.open_table().await {
-                    Ok(t) => t,
-                    Err(e) => {
-                        log_error(&e);
-                        return Err(e);
-                    }
-                };
+                let tbl = self.open_table().await?;
                 let mut merge: MergeInsertBuilder = tbl.merge_insert(&["id"]);
                 merge.when_matched_update_all(None);
                 merge.when_not_matched_insert_all();
@@ -243,11 +232,7 @@ impl VectorStore {
                 merge
                     .execute(Box::new(reader))
                     .await
-                    .map_err(|e| {
-                        let err = format!("merge_insert 失败: {}", e);
-                        log_error(&err);
-                        err
-                    })
+                    .map_err(|e| anyhow::anyhow!("merge_insert 失败: {}", e))
                     .map(|_| ())
             };
 
@@ -263,7 +248,8 @@ impl VectorStore {
                     return Ok(());
                 }
                 Err(e) => {
-                    last_error = e;
+                    last_error = e.to_string();
+                    log_error(&last_error);
                     // 检查是否是 exFAT 相关的 IO 错误
                     if last_error.contains("LanceError(IO)") || last_error.contains("os error 1") {
                         if attempt < max_retries {
@@ -281,20 +267,20 @@ impl VectorStore {
                         }
                     } else {
                         // 非 IO 错误，直接返回
-                        return Err(last_error);
+                        return Err(e);
                     }
                 }
             }
         }
 
-        Err(format!(
+        Err(anyhow::anyhow!(
             "写入向量存储失败（已重试 {} 次）: {}",
             max_retries, last_error
         ))
     }
 
     /// Remove every row whose file_path equals the given path.
-    pub async fn remove_by_file_path(&self, file_path: &str) -> Result<(), String> {
+    pub async fn remove_by_file_path(&self, file_path: &str) -> Result<()> {
         if !self.table_exists {
             return Ok(());
         }
@@ -304,12 +290,12 @@ impl VectorStore {
         let predicate = format!("file_path = '{}'", escaped);
         tbl.delete(&predicate)
             .await
-            .map_err(|e| format!("删除失败: {}", e))?;
+            .context("删除失败")?;
         Ok(())
     }
 
     /// Drop the entire table and all its data, resetting to empty state.
-    pub async fn clear(&mut self) -> Result<(), String> {
+    pub async fn clear(&mut self) -> Result<()> {
         if !self.table_exists {
             return Ok(());
         }
@@ -319,7 +305,7 @@ impl VectorStore {
     }
 
     /// Remove every row whose file_path matches any of the given paths.
-    pub async fn remove_by_paths(&self, paths: &[String]) -> Result<(), String> {
+    pub async fn remove_by_paths(&self, paths: &[String]) -> Result<()> {
         if paths.is_empty() || !self.table_exists {
             return Ok(());
         }
@@ -334,14 +320,14 @@ impl VectorStore {
         let predicate = format!("file_path IN ({})", values);
         tbl.delete(&predicate)
             .await
-            .map_err(|e| format!("批量删除失败: {}", e))?;
+            .context("批量删除失败")?;
         Ok(())
     }
 
     /// Vector similarity search.  Returns results sorted by cosine similarity
     /// (descending).
     /// 优化：使用 HNSW 索引参数进行查询
-    pub async fn search(&self, query: &[f32], top_k: usize) -> Result<Vec<SearchResult>, String> {
+    pub async fn search(&self, query: &[f32], top_k: usize) -> Result<Vec<SearchResult>> {
         if !self.table_exists {
             return Ok(vec![]);
         }
@@ -350,17 +336,17 @@ impl VectorStore {
         let batch_stream = tbl
             .query()
             .nearest_to(query)
-            .map_err(|e| format!("设置查询向量失败: {}", e))?
+            .context("设置查询向量失败")?
             .distance_type(DistanceType::Cosine)
             .limit(top_k)
             .execute()
             .await
-            .map_err(|e| format!("向量搜索执行失败: {}", e))?;
+            .context("向量搜索执行失败")?;
 
         let batches: Vec<RecordBatch> = batch_stream
             .try_collect()
             .await
-            .map_err(|e| format!("收集搜索结果失败: {}", e))?;
+            .context("收集搜索结果失败")?;
 
         let mut results = Vec::new();
         for rb in &batches {
@@ -372,22 +358,22 @@ impl VectorStore {
             let ids = rb
                 .column_by_name("id")
                 .and_then(|c| c.as_any().downcast_ref::<StringArray>())
-                .ok_or_else(|| "搜索结果缺少 id 列".to_string())?;
+                .ok_or_else(|| anyhow::anyhow!("搜索结果缺少 id 列"))?;
 
             let metadata_col = rb
                 .column_by_name("metadata")
                 .and_then(|c| c.as_any().downcast_ref::<StringArray>())
-                .ok_or_else(|| "搜索结果缺少 metadata 列".to_string())?;
+                .ok_or_else(|| anyhow::anyhow!("搜索结果缺少 metadata 列"))?;
 
             let vector_col = rb
                 .column_by_name("vector")
                 .and_then(|c| c.as_any().downcast_ref::<FixedSizeListArray>())
-                .ok_or_else(|| "搜索结果缺少 vector 列".to_string())?;
+                .ok_or_else(|| anyhow::anyhow!("搜索结果缺少 vector 列"))?;
 
             let dist_col = rb
                 .column_by_name("_distance")
                 .and_then(|c| c.as_any().downcast_ref::<Float32Array>())
-                .ok_or_else(|| "搜索结果缺少 _distance 列".to_string())?;
+                .ok_or_else(|| anyhow::anyhow!("搜索结果缺少 _distance 列"))?;
 
             for i in 0..n {
                 let id = ids.value(i);
@@ -403,7 +389,7 @@ impl VectorStore {
                 let float_arr = vec_arr
                     .as_any()
                     .downcast_ref::<Float32Array>()
-                    .ok_or_else(|| "向量列类型转换失败".to_string())?;
+                    .ok_or_else(|| anyhow::anyhow!("向量列类型转换失败"))?;
                 let vector: Vec<f32> = (0..float_arr.len()).map(|j| float_arr.value(j)).collect();
 
                 results.push(SearchResult {
@@ -429,14 +415,14 @@ impl VectorStore {
     }
 
     /// Return the count of rows in the table (0 if table doesn't exist).
-    pub async fn count(&self) -> Result<usize, String> {
+    pub async fn count(&self) -> Result<usize> {
         if !self.table_exists {
             return Ok(0);
         }
         let tbl = self.open_table().await?;
         tbl.count_rows(None)
             .await
-            .map_err(|e| format!("count_rows 失败: {}", e))
+            .context("count_rows 失败")
     }
 
     /// Build an IVF-HNSW-SQ index on the vector column for faster search.
@@ -444,7 +430,7 @@ impl VectorStore {
     /// SQ (Scalar Quantization) 在保持高精度的同时减少存储空间。
     /// 
     /// 应在批量加载数据后调用此方法。
-    pub async fn create_index(&self) -> Result<(), String> {
+    pub async fn create_index(&self) -> Result<()> {
         if !self.table_exists {
             return Ok(());
         }
@@ -465,7 +451,7 @@ impl VectorStore {
         tbl.create_index(&["vector"], index)
             .execute()
             .await
-            .map_err(|e| format!("创建索引失败: {}", e))?;
+            .context("创建索引失败")?;
         
         log_info("向量索引 (IVF-HNSW-SQ) 创建完成");
         Ok(())
@@ -478,7 +464,7 @@ impl VectorStore {
     /// 
     /// 应在大量写入或删除操作后调用。
     #[allow(dead_code)]
-    pub async fn optimize(&self) -> Result<(), String> {
+    pub async fn optimize(&self) -> Result<()> {
         if !self.table_exists {
             return Ok(());
         }
@@ -501,7 +487,7 @@ impl VectorStore {
 
     /// 清理旧版本以释放磁盘空间
     /// 保留最近 N 小时的版本，其余版本将被删除
-    pub async fn cleanup_old_versions(&self) -> Result<(), String> {
+    pub async fn cleanup_old_versions(&self) -> Result<()> {
         if !self.table_exists {
             return Ok(());
         }
@@ -534,7 +520,7 @@ impl VectorStore {
     }
 
     /// 执行文件压缩，合并小文件
-    pub async fn compact_files(&self) -> Result<(), String> {
+    pub async fn compact_files(&self) -> Result<()> {
         if !self.table_exists {
             return Ok(());
         }
@@ -566,15 +552,16 @@ impl VectorStore {
 
     /// 获取表的统计信息
     #[allow(dead_code)]
-    pub async fn get_stats(&self) -> Result<TableStats, String> {
+    pub async fn get_stats(&self) -> Result<TableStats> {
         if !self.table_exists {
             return Ok(TableStats::default());
         }
         let tbl = self.open_table().await?;
         
-        let row_count = tbl.count_rows(None).await.map_err(|e| {
-            format!("获取行数失败: {}", e)
-        })?;
+        let row_count = tbl
+            .count_rows(None)
+            .await
+            .context("获取行数失败")?;
         
         // 尝试获取版本数
         let version_count = match tbl.list_versions().await {

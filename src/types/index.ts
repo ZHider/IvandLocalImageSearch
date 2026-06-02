@@ -13,6 +13,8 @@ export interface AppConfig {
   customProviderName: string
   customEmbeddingPath: string
   imageProcessing: ImageProcessingConfig
+  embedThreads: number
+  advancedOptions: AdvancedOptions
 }
 
 export interface ImageProcessingConfig {
@@ -24,7 +26,6 @@ export const DEFAULT_IMAGE_PROCESSING: ImageProcessingConfig = {
   embedImageSize: 1920,
   thumbnailSize: 300,
 }
-
 export const DEFAULT_CONFIG: AppConfig = {
   apiType: '',
   endpoint: '',
@@ -34,6 +35,24 @@ export const DEFAULT_CONFIG: AppConfig = {
   customProviderName: '',
   customEmbeddingPath: '/v1/embeddings',
   imageProcessing: { ...DEFAULT_IMAGE_PROCESSING },
+  embedThreads: 1,
+  advancedOptions: { ...DEFAULT_ADVANCED_OPTIONS },
+}
+
+export const DEFAULT_NATIVE_EXTENSIONS = [
+  'jpg', 'jpeg', 'png', 'webp', 'bmp', 'tiff', 'ico',
+]
+
+export interface AdvancedOptions {
+  webpThresholdMB: number
+  nativeExtensions: string[]
+  extraEmbeddingParams: string
+}
+
+export const DEFAULT_ADVANCED_OPTIONS: AdvancedOptions = {
+  webpThresholdMB: 4,
+  nativeExtensions: [...DEFAULT_NATIVE_EXTENSIONS],
+  extraEmbeddingParams: '',
 }
 
 export interface ApiTestResult {

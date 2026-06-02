@@ -68,7 +68,7 @@ pub async fn handle_get_thumbnail(token: &str, data: Value, write: &mut WsWriter
                 token,
                 "thumbnailError",
                 serde_json::json!({
-                    "error": e,
+                    "error": e.to_string(),
                     "imagePath": req.image_path,
                 }),
                 write,

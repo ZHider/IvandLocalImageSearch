@@ -1,3 +1,4 @@
+use anyhow::Result;
 use serde::Serialize;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
@@ -24,7 +25,7 @@ pub struct ScanResult {
     pub total: usize,
 }
 
-pub fn scan_folders(folders: &[String]) -> Result<ScanResult, String> {
+pub fn scan_folders(folders: &[String]) -> Result<ScanResult> {
     let mut files = Vec::new();
 
     for folder in folders {

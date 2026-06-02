@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use std::path::Path;
 
 use image::imageops::FilterType;
@@ -36,7 +37,7 @@ impl Default for ProcessingOptions {
 
 /// 打开图片文件，支持标准格式 + HEIC/HEIF。
 /// 标准格式走 `image::open()`，HEIC/HEIF 走纯 Rust `heic` 解码器。
-pub(crate) fn open_image(path: &str) -> Result<DynamicImage, String> {
+pub(crate) fn open_image(path: &str) -> Result<DynamicImage> {
     let ext = Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
@@ -48,22 +49,22 @@ pub(crate) fn open_image(path: &str) -> Result<DynamicImage, String> {
         return decode_heic(path);
     }
 
-    image::open(path).map_err(|e| format!("打开图片失败: {}", e))
+    image::open(path).context("打开图片失败")
 }
 
 /// 使用纯 Rust heic crate 解码 HEIC/HEIF 文件
-fn decode_heic(path: &str) -> Result<DynamicImage, String> {
-    let data = std::fs::read(path).map_err(|e| format!("读取 HEIC 文件失败: {}", e))?;
+fn decode_heic(path: &str) -> Result<DynamicImage> {
+    let data = std::fs::read(path).context("读取 HEIC 文件失败")?;
 
     let output = heic::DecoderConfig::new()
         .decode(&data, heic::PixelLayout::Rgba8)
-        .map_err(|e| format!("解码 HEIC 失败: {}", e))?;
+        .context("解码 HEIC 失败")?;
 
     let width = output.width as u32;
     let height = output.height as u32;
     image::RgbaImage::from_raw(width, height, output.data)
         .map(DynamicImage::ImageRgba8)
-        .ok_or_else(|| "HEIC 解码结果转换为 RgbaImage 失败".to_string())
+        .ok_or_else(|| anyhow::anyhow!("HEIC 解码结果转换为 RgbaImage 失败"))
 }
 
 // ---- HEIC → WebP 缓存（embedding 用） ----
@@ -72,9 +73,9 @@ fn get_images_dir() -> std::path::PathBuf {
     file_utils::get_data_dir().join("images")
 }
 
-fn ensure_images_dir() -> Result<(), String> {
+fn ensure_images_dir() -> Result<()> {
     let dir = get_images_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| format!("创建 images 目录失败: {}", e))
+    std::fs::create_dir_all(&dir).context("创建 images 目录失败")
 }
 
 // ---- EXIF 类型 ----
@@ -109,7 +110,7 @@ fn fit_dimensions(width: u32, height: u32, max_size: u32) -> (u32, u32) {
 
 // ---- EXIF 提取层（纯 Rust，支持 HEIC / JPEG 等） ----
 
-pub fn extract_exif(path: &str) -> Result<ExifInfo, String> {
+pub fn extract_exif(path: &str) -> Result<ExifInfo> {
     let exif_iter = match nom_exif::read_exif_iter(path) {
         Ok(e) => e,
         Err(_) => return Ok(ExifInfo::default()),
@@ -169,7 +170,7 @@ pub(crate) fn generate_thumbnail_from_img(
     img: &DynamicImage,
     hash: &str,
     size: u32,
-) -> Result<String, String> {
+) -> Result<String> {
     let thumb_path = file_utils::get_thumbnails_dir().join(format!("{}.webp", hash));
     if thumb_path.exists() {
         return Ok(thumb_path.to_string_lossy().to_string());
@@ -181,7 +182,7 @@ pub(crate) fn generate_thumbnail_from_img(
     let encoder = webp::Encoder::from_rgba(&rgba, tw, th);
     let encoded = encoder.encode(constants::DEFAULT_WEBP_QUALITY);
     std::fs::write(&thumb_path, encoded.as_ref())
-        .map_err(|e| format!("写入缩略图文件失败: {}", e))?;
+        .context("写入缩略图文件失败")?;
     log_info(&format!(
         "生成缩略图: {}x{} -> {}x{}",
         img.width(),
@@ -198,7 +199,7 @@ pub(crate) fn convert_img_to_webp(
     hash: &str,
     max_size: u32,
     quality: f32,
-) -> Result<String, String> {
+) -> Result<String> {
     ensure_images_dir()?;
     let webp_path = get_images_dir().join(format!("{}.webp", hash));
     if webp_path.exists() {
@@ -211,7 +212,7 @@ pub(crate) fn convert_img_to_webp(
     let encoder = webp::Encoder::from_rgba(&rgba, w, h);
     let encoded = encoder.encode(quality);
     std::fs::write(&webp_path, encoded.as_ref())
-        .map_err(|e| format!("写入 WebP 缓存失败: {}", e))?;
+        .context("写入 WebP 缓存失败")?;
     log_info(&format!(
         "convert_img_to_webp: {}x{} -> {}x{} (q{})",
         img.width(),
@@ -225,10 +226,10 @@ pub(crate) fn convert_img_to_webp(
 
 // ---- 编码层（从文件路径 → 公开 API） ----
 
-pub fn generate_thumbnail(path: &str, size: u32) -> Result<String, String> {
+pub fn generate_thumbnail(path: &str, size: u32) -> Result<String> {
     file_utils::ensure_thumbnails_dir()?;
     let file_hash = hasher::compute_blake3_hex(Path::new(path))
-        .map_err(|e| format!("计算文件哈希失败: {}", e))?;
+        .context("计算文件哈希失败")?;
     let thumb_path = file_utils::get_thumbnails_dir().join(format!("{}.webp", file_hash));
     if thumb_path.exists() {
         return Ok(thumb_path.to_string_lossy().to_string());

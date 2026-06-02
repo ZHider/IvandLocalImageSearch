@@ -45,7 +45,7 @@ pub async fn handle_clear_index(token: &str, write: &mut WsWriter) {
             let _ = ws_client::send_broadcast(
                 token,
                 "clearIndexError",
-                serde_json::json!({ "error": e }),
+                serde_json::json!({ "error": e.to_string() }),
                 write,
             )
             .await;
@@ -258,7 +258,7 @@ pub async fn handle_optimize_index(token: &str, write: &mut WsWriter) {
             let _ = ws_client::send_broadcast(
                 token,
                 "optimizeIndexError",
-                serde_json::json!({ "error": e }),
+                serde_json::json!({ "error": e.to_string() }),
                 write,
             )
             .await;

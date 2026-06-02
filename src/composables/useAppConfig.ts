@@ -34,6 +34,7 @@ function init() {
         embedImageSize: configData.imageProcessing?.embedImageSize ?? DEFAULT_CONFIG.imageProcessing.embedImageSize,
         thumbnailSize: configData.imageProcessing?.thumbnailSize ?? DEFAULT_CONFIG.imageProcessing.thumbnailSize,
       }
+      config.value.embedThreads = configData.embedThreads ?? DEFAULT_CONFIG.embedThreads
     }
     loaded.value = true
     loading.value = false
@@ -96,6 +97,7 @@ export function useAppConfig() {
       customProviderName: isCustomApi.value ? config.value.customProviderName : null,
       customEmbeddingPath: isCustomApi.value ? config.value.customEmbeddingPath : null,
       imageProcessing: config.value.imageProcessing,
+      embedThreads: config.value.embedThreads,
     })
   }
 

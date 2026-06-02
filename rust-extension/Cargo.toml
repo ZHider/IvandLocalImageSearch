@@ -11,7 +11,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
 base64 = "0.22"
-async-openai = { version = "0.40", features = ["model", "embedding", "chat-completion"] }
+reqwest = { version = "0.12", features = ["json"] }
 walkdir = "2"
 blake3 = "1"
 arrow-array = "58"
@@ -23,6 +23,7 @@ image = { version = "0.25", features = ["webp"] }
 nom-exif = "3"
 heic = "0.1.6"
 webp = "0.3.1"
+anyhow = "1"
 
 [profile.release]
 strip = true

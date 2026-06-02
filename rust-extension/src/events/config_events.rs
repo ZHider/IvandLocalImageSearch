@@ -47,7 +47,7 @@ pub async fn handle_test_api_connection(token: &str, data: Value, write: &mut Ws
                 "apiConnectionResult",
                 serde_json::json!({
                     "success": false,
-                    "message": e,
+                    "message": e.to_string(),
                 }),
                 write,
             )
@@ -139,11 +139,11 @@ pub async fn handle_save_config(token: &str, data: Value, write: &mut WsWriter) 
             .await;
         }
         Err(e) => {
-            log_error(&e);
+            log_error(&e.to_string());
             let _ = ws_client::send_broadcast(
                 token,
                 "configSaveError",
-                serde_json::json!({ "error": e }),
+                serde_json::json!({ "error": e.to_string() }),
                 write,
             )
             .await;

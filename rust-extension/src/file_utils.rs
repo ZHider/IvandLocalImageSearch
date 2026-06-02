@@ -1,5 +1,6 @@
 //! 文件工具函数：类型检查、目录创建。
 
+use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
 use crate::constants;
@@ -61,7 +62,7 @@ pub fn get_thumbnails_dir() -> PathBuf {
 }
 
 /// 确保缩略图目录存在
-pub fn ensure_thumbnails_dir() -> Result<(), String> {
+pub fn ensure_thumbnails_dir() -> Result<()> {
     let dir = get_thumbnails_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| format!("创建缩略图目录失败: {}", e))
+    std::fs::create_dir_all(&dir).context("创建缩略图目录失败")
 }

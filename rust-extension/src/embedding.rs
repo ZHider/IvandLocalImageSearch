@@ -1,10 +1,13 @@
-use crate::{log_error, log_info};
-use async_openai::{
-    config::OpenAIConfig,
-    types::embeddings::{CreateEmbeddingRequestArgs, EncodingFormat},
-    Client,
-};
+//! Embedding API 客户端。
+//!
+//! 使用 vLLM /v1/embeddings 端点的 Chat Embeddings 扩展协议。
+//! 纯文本和图片均通过 `messages` 数组传入，适合多模态模型。
+
+use crate::log_info;
+use anyhow::{Context, Result};
+use base64::Engine;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ApiConfig {
@@ -12,171 +15,307 @@ pub struct ApiConfig {
     pub base_url: String,
     pub api_key: Option<String>,
     pub model: String,
+    /// 注入到 embedding 请求体 parameters 字段的额外参数
+    pub extra_embedding_params: Option<serde_json::Value>,
 }
 
 pub struct ApiClient {
-    client: Client<OpenAIConfig>,
+    client: reqwest::Client,
+    base_url: String,
     model: String,
+    instruction: String,
+    extra_embedding_params: Option<serde_json::Value>,
 }
 
-fn build_client(config: &ApiConfig) -> Client<OpenAIConfig> {
-    let base_url = config.base_url.trim_end_matches('/').to_string();
-    let mut c = OpenAIConfig::new().with_api_base(&base_url);
-    if let Some(key) = &config.api_key {
-        if !key.is_empty() {
-            c = c.with_api_key(key);
+// ---- MIME 类型推断 ----
+
+fn mime_from_ext(path: &str) -> String {
+    let ext = Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("jpeg")
+        .to_lowercase();
+    if ext == "tif" {
+        return "image/tiff".to_string();
+    }
+    format!("image/{}", ext)
+}
+
+// ---- 请求体构建 ----
+
+fn default_instruction() -> String {
+    "Represent the user's input.".to_string()
+}
+
+fn build_messages_with_image(
+    instruction: &str,
+    image_data_url: &str,
+    text: &str,
+) -> serde_json::Value {
+    let mut user_content: Vec<serde_json::Value> = vec![
+        serde_json::json!({
+            "type": "image_url",
+            "image_url": { "url": image_data_url }
+        }),
+    ];
+    if !text.is_empty() {
+        user_content.push(serde_json::json!({ "type": "text", "text": text }));
+    }
+
+    serde_json::json!([
+        {
+            "role": "system",
+            "content": [{"type": "text", "text": instruction}]
+        },
+        {
+            "role": "user",
+            "content": user_content
+        },
+        {
+            "role": "assistant",
+            "content": [{"type": "text", "text": ""}]
+        }
+    ])
+}
+
+fn build_messages_with_text(instruction: &str, text: &str) -> serde_json::Value {
+    serde_json::json!([
+        {
+            "role": "system",
+            "content": [{"type": "text", "text": instruction}]
+        },
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": text}]
+        },
+        {
+            "role": "assistant",
+            "content": [{"type": "text", "text": ""}]
+        }
+    ])
+}
+
+fn build_request_body(
+    model: &str,
+    messages: serde_json::Value,
+    extra_params: &Option<serde_json::Value>,
+) -> serde_json::Value {
+    let mut body = serde_json::json!({
+        "model": model,
+        "messages": messages,
+        "encoding_format": "float",
+        "continue_final_message": true,
+        "add_special_tokens": true,
+    });
+    if let Some(params) = extra_params {
+        if params.is_object() {
+            body.as_object_mut()
+                .unwrap()
+                .insert("parameters".to_string(), params.clone());
         }
     }
-    Client::with_config(c)
+    body
 }
+
+// ---- 响应解析 ----
+
+fn extract_embedding_vec(response: &serde_json::Value) -> Result<Vec<f32>> {
+    let vec = match response {
+        serde_json::Value::Object(map) if map.contains_key("data") => {
+            let data = map["data"]
+                .as_array()
+                .context("data 字段不是数组")?;
+            let first = data.first().context("data 数组为空")?;
+            let emb = first
+                .get("embedding")
+                .context("data[0] 缺少 embedding 字段")?;
+            if let Some(outer) = emb.as_array() {
+                if let Some(inner) = outer.first().and_then(|v| v.as_array()) {
+                    inner
+                } else {
+                    outer
+                }
+            } else {
+                anyhow::bail!("embedding 不是数组");
+            }
+        }
+        serde_json::Value::Array(arr) if !arr.is_empty() => {
+            if let Some(obj) = arr[0].as_object() {
+                let emb = obj
+                    .get("embedding")
+                    .context("数组元素缺少 embedding 字段")?;
+                if let Some(outer) = emb.as_array() {
+                    if let Some(inner) = outer.first().and_then(|v| v.as_array()) {
+                        inner
+                    } else {
+                        outer
+                    }
+                } else {
+                    anyhow::bail!("embedding 不是数组");
+                }
+            } else if arr[0].is_array() {
+                arr[0].as_array().unwrap()
+            } else if arr[0].is_number() {
+                arr
+            } else {
+                anyhow::bail!("无法识别的响应数组元素类型");
+            }
+        }
+        other => {
+            anyhow::bail!("无法识别的响应类型: {:?}", other);
+        }
+    };
+
+    let result: Vec<f32> = vec
+        .iter()
+        .map(|v| {
+            v.as_f64()
+                .map(|f| f as f32)
+                .context("向量元素不是数值")
+        })
+        .collect::<Result<Vec<_>>>()
+        .context("解析 embedding 向量失败")?;
+
+    if result.is_empty() {
+        anyhow::bail!("embedding 向量为空");
+    }
+    Ok(result)
+}
+
+// ---- ApiClient ----
 
 impl ApiClient {
     pub fn new(config: &ApiConfig) -> Self {
-        let client = build_client(config);
-        let model = config.model.clone();
-        Self { client, model }
+        let mut headers = reqwest::header::HeaderMap::new();
+        if let Some(key) = &config.api_key {
+            let val = format!("Bearer {}", key);
+            if let Ok(hv) = reqwest::header::HeaderValue::from_str(&val) {
+                headers.insert(reqwest::header::AUTHORIZATION, hv);
+            }
+        }
+
+        let client = reqwest::Client::builder()
+            .default_headers(headers)
+            .build()
+            .expect("构建 reqwest Client 失败");
+
+        Self {
+            client,
+            base_url: config.base_url.trim_end_matches('/').to_string(),
+            model: config.model.clone(),
+            instruction: default_instruction(),
+            extra_embedding_params: config.extra_embedding_params.clone(),
+        }
     }
 
-    pub async fn embed_text(&self, text: &str) -> Result<Vec<f32>, String> {
-        log_info(&format!("embed_text 输入长度: {}", text.len()));
-        let request = CreateEmbeddingRequestArgs::default()
-            .model(&self.model)
-            .input(text)
-            .encoding_format(EncodingFormat::Float)
-            .build()
-            .map_err(|e| format!("构建 embedding 请求失败: {}", e))?;
+    pub async fn embed_text(&self, text: &str) -> Result<Vec<f32>> {
+        log_info(&format!("embed_text: 输入长度={}", text.len()));
+
+        let messages = build_messages_with_text(&self.instruction, text);
+        let body = build_request_body(&self.model, messages, &self.extra_embedding_params);
+
         log_info(&format!(
             "embed_text 请求体: {}",
-            serde_json::to_string(&request).unwrap_or_default()
+            serde_json::to_string(&body).unwrap_or_default()
         ));
 
-        let response = match self.client.embeddings().create(request.clone()).await {
-            Ok(r) => {
-                let dim = r.data[0].embedding.len();
-                log_info(&format!(
-                    "embed_text 标准路径成功, data 条数: {}, 向量维数: {}",
-                    r.data.len(),
-                    dim
-                ));
-                if dim == 0 {
-                    log_error("embed_text: 标准路径返回空向量");
-                    return Err("返回的 embedding 向量为空".to_string());
-                }
-                return Ok(r.data[0].embedding.clone());
-            }
-            Err(async_openai::error::OpenAIError::JSONDeserialize(_, body)) => {
-                log_info(&format!(
-                    "embed_text 非标准响应格式, 原始响应前 200 字节: {:?}",
-                    &body[..body.len().min(200)]
-                ));
-                body
-            }
-            Err(e) => return Err(format!("Embedding 请求失败: {}", e)),
-        };
+        let url = format!("{}/v1/embeddings", self.base_url);
+        let resp = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .context("embed_text HTTP 请求失败")?;
 
-        let value: serde_json::Value =
-            serde_json::from_str(&response).map_err(|e| format!("解析响应失败: {}", e))?;
-        log_info(&format!(
-            "embed_text 手动解析, 响应顶层类型: {:?}",
-            top_level_type(&value)
-        ));
-        let vec = extract_embedding_vec(&value)?;
-        log_info(&format!("embed_text 手动解析成功, 向量维数: {}", vec.len()));
-        if vec.is_empty() {
-            log_error("embed_text: 手动解析返回空向量");
-            return Err("返回的 embedding 向量为空".to_string());
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            anyhow::bail!("embed_text HTTP {}: {}", status, text);
         }
+
+        let data: serde_json::Value = resp.json().await?;
+        let vec = extract_embedding_vec(&data)?;
+
+        log_info(&format!("embed_text 成功: dim={}", vec.len()));
         Ok(vec)
     }
 
-    /// 将图片路径以 file:// 前缀送入多模态 Embedding API。
-    /// QwenVLEmbedding 等服务端通过 file:// 前缀识别本地文件路径。
-    pub async fn embed_image(&self, image_path: &str) -> Result<Vec<f32>, String> {
-        let file_uri = format!("file:///{}", image_path.replace('\\', "/"));
-        log_info(&format!("embed_image: file_uri={}", file_uri));
-        self.embed_text(&file_uri).await
-    }
+    pub async fn embed_image(&self, image_path: &str) -> Result<Vec<f32>> {
+        log_info(&format!("embed_image: 读取 {}", image_path));
 
-    pub async fn health_check(&self) -> Result<Vec<String>, String> {
-        self.client
-            .models()
-            .list()
+        let image_bytes = tokio::fs::read(image_path)
             .await
-            .map(|response| response.data.into_iter().map(|m| m.id).collect())
-            .map_err(|e| format!("连接失败: {}", e))
+            .with_context(|| format!("读取图片文件失败: {}", image_path))?;
+
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&image_bytes);
+        let mime = mime_from_ext(image_path);
+        let data_url = format!("data:{};base64,{}", mime, b64);
+
+        log_info(&format!(
+            "embed_image: 编码完成, mime={}, base64长度={}",
+            mime,
+            b64.len()
+        ));
+
+        let messages = build_messages_with_image(&self.instruction, &data_url, "");
+        let body = build_request_body(&self.model, messages, &self.extra_embedding_params);
+
+        let url = format!("{}/v1/embeddings", self.base_url);
+        let resp = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .context("embed_image HTTP 请求失败")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            anyhow::bail!("embed_image HTTP {}: {}", status, text);
+        }
+
+        let data: serde_json::Value = resp.json().await?;
+        let vec = extract_embedding_vec(&data)?;
+
+        log_info(&format!("embed_image 成功: dim={}", vec.len()));
+        Ok(vec)
+    }
+
+    pub async fn health_check(&self) -> Result<Vec<String>> {
+        let url = format!("{}/v1/models", self.base_url);
+        log_info(&format!("health_check: GET {}", url));
+
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .context("health_check HTTP 请求失败")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            anyhow::bail!("health_check HTTP {}: {}", status, text);
+        }
+
+        let data: serde_json::Value = resp.json().await?;
+
+        let models = data["data"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v["id"].as_str().map(|s| s.to_string()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        log_info(&format!("health_check 成功: {} 个模型", models.len()));
+        Ok(models)
     }
 }
 
-fn top_level_type(v: &serde_json::Value) -> String {
-    match v {
-        serde_json::Value::Null => "Null".into(),
-        serde_json::Value::Bool(_) => "Bool".into(),
-        serde_json::Value::Number(_) => "Number".into(),
-        serde_json::Value::String(_) => "String".into(),
-        serde_json::Value::Array(arr) => {
-            if arr.len() > 1 {
-                format!("Array(len={})", arr.len())
-            } else if arr.len() == 1 {
-                format!("Array(len=1, elem={})", top_level_type(&arr[0]))
-            } else {
-                "Array(empty)".into()
-            }
-        }
-        serde_json::Value::Object(obj) => {
-            let keys: Vec<&String> = obj.keys().collect();
-            format!("Object(keys={:?})", keys)
-        }
-    }
-}
-
-fn extract_embedding_vec(response: &serde_json::Value) -> Result<Vec<f32>, String> {
-    let data_array = match response.get("data") {
-        Some(serde_json::Value::Array(arr)) => arr,
-        Some(_) => match response {
-            serde_json::Value::Array(arr) => arr,
-            _ => return Err("响应中没有 data 数组，也不是顶层数组".to_string()),
-        },
-        None => match response {
-            serde_json::Value::Array(arr) => arr,
-            _ => return Err("响应中没有 data 字段".to_string()),
-        },
-    };
-
-    if data_array.is_empty() {
-        return Err("data 数组为空".to_string());
-    }
-
-    let first = &data_array[0];
-
-    match first.get("embedding") {
-        Some(serde_json::Value::Array(emb)) => {
-            if emb.is_empty() {
-                return Err("embedding 数组为空".to_string());
-            }
-            if let Some(inner) = emb[0].as_array() {
-                inner
-                    .iter()
-                    .map(|v| {
-                        v.as_f64()
-                            .map(|f| f as f32)
-                            .ok_or_else(|| "向量元素不是 f64".to_string())
-                    })
-                    .collect()
-            } else {
-                emb.iter()
-                    .map(|v| {
-                        v.as_f64()
-                            .map(|f| f as f32)
-                            .ok_or_else(|| "向量元素不是 f64".to_string())
-                    })
-                    .collect()
-            }
-        }
-        Some(_) => Err("embedding 字段不是数组".to_string()),
-        None => Err("响应条目中没有 embedding 字段".to_string()),
-    }
-}
-
-pub fn create_client(config: &ApiConfig) -> Result<ApiClient, String> {
+pub fn create_client(config: &ApiConfig) -> Result<ApiClient> {
     Ok(ApiClient::new(config))
 }

@@ -53,7 +53,7 @@ async fn generate_query_vector(
                     let _ = ws_client::send_broadcast(
                         token,
                         "searchError",
-                        serde_json::json!({ "error": e }),
+                        serde_json::json!({ "error": e.to_string() }),
                         write,
                     )
                     .await;
@@ -80,7 +80,7 @@ async fn generate_query_vector(
                     let _ = ws_client::send_broadcast(
                         token,
                         "searchError",
-                        serde_json::json!({ "error": e }),
+                        serde_json::json!({ "error": e.to_string() }),
                         write,
                     )
                     .await;
@@ -130,7 +130,7 @@ async fn perform_search(
             let _ = ws_client::send_broadcast(
                 token,
                 "searchError",
-                serde_json::json!({ "error": e }),
+                serde_json::json!({ "error": e.to_string() }),
                 write,
             )
             .await;
@@ -257,7 +257,7 @@ pub async fn handle_search(token: &str, data: Value, write: &mut WsWriter) {
             let _ = ws_client::send_broadcast(
                 token,
                 "searchError",
-                serde_json::json!({ "error": e }),
+                serde_json::json!({ "error": e.to_string() }),
                 write,
             )
             .await;
@@ -321,7 +321,7 @@ async fn create_search_client(token: &str, write: &mut WsWriter) -> Option<embed
             let _ = ws_client::send_broadcast(
                 token,
                 "searchError",
-                serde_json::json!({ "error": e }),
+                serde_json::json!({ "error": e.to_string() }),
                 write,
             )
             .await;

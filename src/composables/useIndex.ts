@@ -50,14 +50,14 @@ export function useIndex() {
     result.value = null
   })
 
-  function start(folders: string[]) {
+  function start(folders: string[], embedThreads: number = 1) {
     if (folders.length === 0) return
 
     indexing.value = true
     result.value = null
     progress.value = null
 
-    send('startIndex', { folders })
+    send('startIndex', { folders, embedThreads })
   }
 
   return {

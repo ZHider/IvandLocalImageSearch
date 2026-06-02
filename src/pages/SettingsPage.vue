@@ -4,6 +4,7 @@ import type { MenuOption } from 'naive-ui'
 import { useAppConfig } from '../composables/useAppConfig'
 import ApiSettingsForm from '../components/ApiSettingsForm.vue'
 import ImageProcessingForm from '../components/ImageProcessingForm.vue'
+import AdvancedOptionsForm from '../components/AdvancedOptionsForm.vue'
 
 const {
   config,
@@ -28,6 +29,11 @@ const menuOptions: MenuOption[] = [
     key: 'image',
     icon: () => h('span', '🖼️'),
   },
+  {
+    label: '高级选项',
+    key: 'advanced',
+    icon: () => h('span', '⚙️'),
+  },
 ]
 
 </script>
@@ -51,8 +57,15 @@ const menuOptions: MenuOption[] = [
         <div class="settings-body">
           <Transition name="slide" mode="out-in">
             <div :key="activeTab" class="settings-section">
+              <AdvancedOptionsForm
+                v-if="activeTab === 'advanced'"
+                :config="config"
+                :saving="saving"
+                :loading="loading"
+                @save="doSave"
+              />
               <ImageProcessingForm
-                v-if="activeTab === 'image'"
+                v-else-if="activeTab === 'image'"
                 :config="config"
                 :saving="saving"
                 :loading="loading"
