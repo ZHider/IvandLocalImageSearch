@@ -4,7 +4,7 @@
     "writeToLogFile": false
   },
   "applicationId": "localimagesearch",
-  "version": "1.0.0",
+  "version": "0.3.0",
   "defaultMode": "window",
   "documentRoot": "/dist-vue/",
   "url": "/",
