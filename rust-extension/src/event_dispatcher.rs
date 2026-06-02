@@ -131,10 +131,14 @@ impl EventDispatcher {
                 crate::events::handle_clear_expired_thumbnails(token, write).await;
             }
             // NeutralinoJS 框架内部事件，无需处理
-            "windowBlur" | "windowFocus"
-            | "clientConnect" | "clientDisconnect"
-            | "appClientConnect" | "appClientDisconnect"
-            | "extClientConnect" | "extClientDisconnect"
+            "windowBlur"
+            | "windowFocus"
+            | "clientConnect"
+            | "clientDisconnect"
+            | "appClientConnect"
+            | "appClientDisconnect"
+            | "extClientConnect"
+            | "extClientDisconnect"
             | "extensionReady" => {}
             other => {
                 log_info(&format!("收到未知事件: {}", other));

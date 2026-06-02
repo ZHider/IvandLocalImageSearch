@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use image::DynamicImage;
 use image::imageops::FilterType;
+use image::DynamicImage;
 use serde::Serialize;
 
 use crate::config::ImageProcessingConfig;
@@ -77,7 +77,6 @@ fn ensure_images_dir() -> Result<(), String> {
     std::fs::create_dir_all(&dir).map_err(|e| format!("创建 images 目录失败: {}", e))
 }
 
-
 // ---- EXIF 类型 ----
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct ExifInfo {
@@ -131,14 +130,31 @@ pub fn extract_exif(path: &str) -> Result<ExifInfo, String> {
     });
 
     let info = ExifInfo {
-        camera_make: exif.get(nom_exif::ExifTag::Make).and_then(|v| v.as_str().map(|s| s.to_string())),
-        camera_model: exif.get(nom_exif::ExifTag::Model).and_then(|v| v.as_str().map(|s| s.to_string())),
-        iso: exif.get(nom_exif::ExifTag::ISOSpeedRatings).and_then(|v| v.as_str().map(|s| s.to_string())),
-        aperture: exif.get(nom_exif::ExifTag::FNumber).and_then(|v| v.as_str().map(|s| s.to_string()))
-            .or_else(|| exif.get(nom_exif::ExifTag::ApertureValue).and_then(|v| v.as_str().map(|s| s.to_string()))),
-        shutter_speed: exif.get(nom_exif::ExifTag::ExposureTime).and_then(|v| v.as_str().map(|s| s.to_string())),
-        focal_length: exif.get(nom_exif::ExifTag::FocalLength).and_then(|v| v.as_str().map(|s| s.to_string())),
-        date_taken: exif.get(nom_exif::ExifTag::DateTimeOriginal).and_then(|v| v.as_str().map(|s| s.to_string())),
+        camera_make: exif
+            .get(nom_exif::ExifTag::Make)
+            .and_then(|v| v.as_str().map(|s| s.to_string())),
+        camera_model: exif
+            .get(nom_exif::ExifTag::Model)
+            .and_then(|v| v.as_str().map(|s| s.to_string())),
+        iso: exif
+            .get(nom_exif::ExifTag::ISOSpeedRatings)
+            .and_then(|v| v.as_str().map(|s| s.to_string())),
+        aperture: exif
+            .get(nom_exif::ExifTag::FNumber)
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+            .or_else(|| {
+                exif.get(nom_exif::ExifTag::ApertureValue)
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+            }),
+        shutter_speed: exif
+            .get(nom_exif::ExifTag::ExposureTime)
+            .and_then(|v| v.as_str().map(|s| s.to_string())),
+        focal_length: exif
+            .get(nom_exif::ExifTag::FocalLength)
+            .and_then(|v| v.as_str().map(|s| s.to_string())),
+        date_taken: exif
+            .get(nom_exif::ExifTag::DateTimeOriginal)
+            .and_then(|v| v.as_str().map(|s| s.to_string())),
         gps_latitude,
         gps_longitude,
     };
@@ -166,7 +182,13 @@ pub(crate) fn generate_thumbnail_from_img(
     let encoded = encoder.encode(constants::DEFAULT_WEBP_QUALITY);
     std::fs::write(&thumb_path, encoded.as_ref())
         .map_err(|e| format!("写入缩略图文件失败: {}", e))?;
-    log_info(&format!("生成缩略图: {}x{} -> {}x{}", img.width(), img.height(), new_w, new_h));
+    log_info(&format!(
+        "生成缩略图: {}x{} -> {}x{}",
+        img.width(),
+        img.height(),
+        new_w,
+        new_h
+    ));
     Ok(thumb_path.to_string_lossy().to_string())
 }
 
@@ -190,7 +212,14 @@ pub(crate) fn convert_img_to_webp(
     let encoded = encoder.encode(quality);
     std::fs::write(&webp_path, encoded.as_ref())
         .map_err(|e| format!("写入 WebP 缓存失败: {}", e))?;
-    log_info(&format!("convert_img_to_webp: {}x{} -> {}x{} (q{})", img.width(), img.height(), new_w, new_h, quality));
+    log_info(&format!(
+        "convert_img_to_webp: {}x{} -> {}x{} (q{})",
+        img.width(),
+        img.height(),
+        new_w,
+        new_h,
+        quality
+    ));
     Ok(webp_path.to_string_lossy().to_string())
 }
 

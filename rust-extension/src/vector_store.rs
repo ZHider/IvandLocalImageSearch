@@ -59,7 +59,11 @@ fn entries_to_batch(entries: &[VectorEntry]) -> Result<RecordBatch, String> {
         return Err("entries_to_batch: empty slice".into());
     }
     let dim = entries[0].vector.len() as i32;
-    log_info(&format!("entries_to_batch: 条目数 {}, 向量维数 {}", entries.len(), dim));
+    log_info(&format!(
+        "entries_to_batch: 条目数 {}, 向量维数 {}",
+        entries.len(),
+        dim
+    ));
     let schema = make_schema(dim);
 
     let n = entries.len();
@@ -98,7 +102,9 @@ fn entries_to_batch(entries: &[VectorEntry]) -> Result<RecordBatch, String> {
     let batch = RecordBatch::try_new(
         schema.clone(),
         vec![
-            Arc::new(StringArray::from(ids.iter().map(|s| s.as_str()).collect::<Vec<&str>>())),
+            Arc::new(StringArray::from(
+                ids.iter().map(|s| s.as_str()).collect::<Vec<&str>>(),
+            )),
             Arc::new(
                 FixedSizeListArray::from_iter_primitive::<Float32Type, _, _>(
                     all_vectors.chunks(dim as usize).map(|chunk| {
@@ -197,8 +203,7 @@ impl VectorStore {
             merge.when_not_matched_insert_all();
             let schema = batch.schema();
             let batch_iter = vec![Ok(batch)].into_iter();
-            let reader =
-                arrow_array::RecordBatchIterator::new(batch_iter, schema);
+            let reader = arrow_array::RecordBatchIterator::new(batch_iter, schema);
             merge
                 .execute(Box::new(reader))
                 .await
@@ -241,7 +246,11 @@ impl VectorStore {
         let tbl = self.open_table().await?;
         // Build: file_path IN ('escaped1', 'escaped2', ...)
         let escaped: Vec<String> = paths.iter().map(|p| p.replace('\'', "''")).collect();
-        let values = escaped.iter().map(|p| format!("'{}'", p)).collect::<Vec<_>>().join(", ");
+        let values = escaped
+            .iter()
+            .map(|p| format!("'{}'", p))
+            .collect::<Vec<_>>()
+            .join(", ");
         let predicate = format!("file_path IN ({})", values);
         tbl.delete(&predicate)
             .await
@@ -320,9 +329,7 @@ impl VectorStore {
                     .as_any()
                     .downcast_ref::<Float32Array>()
                     .ok_or_else(|| "向量列类型转换失败".to_string())?;
-                let vector: Vec<f32> = (0..float_arr.len())
-                    .map(|j| float_arr.value(j))
-                    .collect();
+                let vector: Vec<f32> = (0..float_arr.len()).map(|j| float_arr.value(j)).collect();
 
                 results.push(SearchResult {
                     entry: VectorEntry {
@@ -337,7 +344,11 @@ impl VectorStore {
 
         // Sort by score descending (already ordered by LanceDB distance,
         // but let's be explicit)
-        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         Ok(results)
     }
@@ -352,7 +363,6 @@ impl VectorStore {
             .await
             .map_err(|e| format!("count_rows 失败: {}", e))
     }
-
 
     /// Build an IVF-PQ index on the vector column for faster search.
     /// Call this once after bulk-loading data.

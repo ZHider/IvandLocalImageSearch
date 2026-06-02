@@ -140,7 +140,9 @@ async fn perform_search(
 }
 
 /// 阶段 3：去重（按文件路径保留最高分）
-fn deduplicate_results(raw_results: &[vector_store::SearchResult]) -> Vec<&vector_store::SearchResult> {
+fn deduplicate_results(
+    raw_results: &[vector_store::SearchResult],
+) -> Vec<&vector_store::SearchResult> {
     let mut best_idx: HashMap<String, usize> = HashMap::new();
     for (i, sr) in raw_results.iter().enumerate() {
         let fp = sr.entry.metadata["file_path"]
@@ -162,10 +164,8 @@ fn deduplicate_results(raw_results: &[vector_store::SearchResult]) -> Vec<&vecto
         }
     }
 
-    let mut deduped: Vec<&vector_store::SearchResult> = best_idx
-        .into_values()
-        .map(|i| &raw_results[i])
-        .collect();
+    let mut deduped: Vec<&vector_store::SearchResult> =
+        best_idx.into_values().map(|i| &raw_results[i]).collect();
     deduped.sort_by(|a, b| {
         b.score
             .partial_cmp(&a.score)
@@ -185,8 +185,14 @@ fn format_search_result(deduped: &[&vector_store::SearchResult]) -> Vec<serde_js
             let file_type = meta.get("file_type").and_then(|v| v.as_str()).unwrap_or("");
             let file_name = meta.get("file_name").and_then(|v| v.as_str()).unwrap_or("");
             let file_size = meta.get("file_size").and_then(|v| v.as_u64()).unwrap_or(0);
-            let thumbnail_path = meta.get("thumbnail_path").and_then(|v| v.as_str()).unwrap_or("");
-            let chunk_text = meta.get("chunk_text").and_then(|v| v.as_str()).unwrap_or("");
+            let thumbnail_path = meta
+                .get("thumbnail_path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let chunk_text = meta
+                .get("chunk_text")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let exif = meta.get("exif").cloned().unwrap_or(serde_json::json!({}));
 
             let mut item = serde_json::json!({
@@ -199,7 +205,8 @@ fn format_search_result(deduped: &[&vector_store::SearchResult]) -> Vec<serde_js
             });
 
             if !chunk_text.is_empty() {
-                item["text_preview"] = serde_json::json!(chunk_text.chars().take(200).collect::<String>());
+                item["text_preview"] =
+                    serde_json::json!(chunk_text.chars().take(200).collect::<String>());
             }
 
             if !exif.is_null() && exif != serde_json::json!({}) {
@@ -290,10 +297,7 @@ pub async fn handle_search(token: &str, data: Value, write: &mut WsWriter) {
 
 // ---- 辅助函数：创建搜索客户端 ----
 
-async fn create_search_client(
-    token: &str,
-    write: &mut WsWriter,
-) -> Option<embedding::ApiClient> {
+async fn create_search_client(token: &str, write: &mut WsWriter) -> Option<embedding::ApiClient> {
     let app_config = match config::load_config_from_file() {
         Ok(c) => c,
         Err(e) => {

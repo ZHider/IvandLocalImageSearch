@@ -42,9 +42,8 @@ pub async fn send_broadcast(
 
 pub struct WsConnection {
     pub write: WsWriter,
-    pub read: futures_util::stream::SplitStream<
-        WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>,
-    >,
+    pub read:
+        futures_util::stream::SplitStream<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>>,
     pub token: String,
 }
 

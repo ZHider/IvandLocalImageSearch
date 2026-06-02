@@ -1,6 +1,6 @@
+use crate::file_utils;
 use rusqlite::{params, Connection, Result};
 use std::path::PathBuf;
-use crate::file_utils;
 
 pub struct IndexMeta {
     pub file_path: String,
@@ -36,8 +36,7 @@ pub fn insert_meta(file_path: &str, file_hash: &str, indexed_at: &str) -> Result
 
 pub fn get_all_meta() -> Result<Vec<IndexMeta>> {
     let conn = open_db()?;
-    let mut stmt =
-        conn.prepare("SELECT file_path, file_hash, indexed_at FROM index_meta")?;
+    let mut stmt = conn.prepare("SELECT file_path, file_hash, indexed_at FROM index_meta")?;
     let rows = stmt.query_map([], |row| {
         Ok(IndexMeta {
             file_path: row.get(0)?,
@@ -55,7 +54,10 @@ pub fn get_all_meta() -> Result<Vec<IndexMeta>> {
 
 pub fn delete_meta(file_path: &str) -> Result<()> {
     let conn = open_db()?;
-    conn.execute("DELETE FROM index_meta WHERE file_path = ?1", params![file_path])?;
+    conn.execute(
+        "DELETE FROM index_meta WHERE file_path = ?1",
+        params![file_path],
+    )?;
     Ok(())
 }
 
@@ -105,7 +107,10 @@ fn build_where_clause(
 }
 
 fn to_sql_refs(params: &[String]) -> Vec<&dyn rusqlite::types::ToSql> {
-    params.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect()
+    params
+        .iter()
+        .map(|s| s as &dyn rusqlite::types::ToSql)
+        .collect()
 }
 
 /// 按可选条件查询元数据。
@@ -118,8 +123,11 @@ pub fn query_meta(
 ) -> Result<Vec<IndexMeta>> {
     let conn = open_db()?;
     let where_clause = build_where_clause(path_filter, time_after, time_before);
-    
-    let mut sql = format!("SELECT file_path, file_hash, indexed_at FROM index_meta {}", where_clause.sql);
+
+    let mut sql = format!(
+        "SELECT file_path, file_hash, indexed_at FROM index_meta {}",
+        where_clause.sql
+    );
     sql.push_str(" ORDER BY indexed_at DESC");
 
     if let Some(l) = limit {
@@ -155,7 +163,7 @@ pub fn count_meta(
 ) -> Result<i64> {
     let conn = open_db()?;
     let where_clause = build_where_clause(path_filter, time_after, time_before);
-    
+
     let sql = format!("SELECT COUNT(*) FROM index_meta {}", where_clause.sql);
     let params_refs = to_sql_refs(&where_clause.params);
 
@@ -170,12 +178,15 @@ pub fn delete_meta_batch(file_paths: &[String]) -> Result<()> {
     }
     let conn = open_db()?;
     // Build: file_path IN (?1, ?2, ...)
-    let placeholders: Vec<String> = (1..=file_paths.len())
-        .map(|i| format!("?{}", i))
+    let placeholders: Vec<String> = (1..=file_paths.len()).map(|i| format!("?{}", i)).collect();
+    let sql = format!(
+        "DELETE FROM index_meta WHERE file_path IN ({})",
+        placeholders.join(", ")
+    );
+    let params_refs: Vec<&dyn rusqlite::types::ToSql> = file_paths
+        .iter()
+        .map(|s| s as &dyn rusqlite::types::ToSql)
         .collect();
-    let sql = format!("DELETE FROM index_meta WHERE file_path IN ({})", placeholders.join(", "));
-    let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-        file_paths.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
     conn.execute(&sql, params_refs.as_slice())?;
     Ok(())
 }

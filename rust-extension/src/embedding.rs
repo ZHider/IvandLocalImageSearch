@@ -1,10 +1,10 @@
+use crate::{log_error, log_info};
 use async_openai::{
     config::OpenAIConfig,
     types::embeddings::{CreateEmbeddingRequestArgs, EncodingFormat},
     Client,
 };
 use serde::{Deserialize, Serialize};
-use crate::{log_error, log_info};
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ApiConfig {
@@ -45,12 +45,19 @@ impl ApiClient {
             .encoding_format(EncodingFormat::Float)
             .build()
             .map_err(|e| format!("构建 embedding 请求失败: {}", e))?;
-        log_info(&format!("embed_text 请求体: {}", serde_json::to_string(&request).unwrap_or_default()));
+        log_info(&format!(
+            "embed_text 请求体: {}",
+            serde_json::to_string(&request).unwrap_or_default()
+        ));
 
         let response = match self.client.embeddings().create(request.clone()).await {
             Ok(r) => {
                 let dim = r.data[0].embedding.len();
-                log_info(&format!("embed_text 标准路径成功, data 条数: {}, 向量维数: {}", r.data.len(), dim));
+                log_info(&format!(
+                    "embed_text 标准路径成功, data 条数: {}, 向量维数: {}",
+                    r.data.len(),
+                    dim
+                ));
                 if dim == 0 {
                     log_error("embed_text: 标准路径返回空向量");
                     return Err("返回的 embedding 向量为空".to_string());
@@ -58,16 +65,21 @@ impl ApiClient {
                 return Ok(r.data[0].embedding.clone());
             }
             Err(async_openai::error::OpenAIError::JSONDeserialize(_, body)) => {
-                log_info(&format!("embed_text 非标准响应格式, 原始响应前 200 字节: {:?}",
-                    &body[..body.len().min(200)]));
+                log_info(&format!(
+                    "embed_text 非标准响应格式, 原始响应前 200 字节: {:?}",
+                    &body[..body.len().min(200)]
+                ));
                 body
             }
             Err(e) => return Err(format!("Embedding 请求失败: {}", e)),
         };
 
-        let value: serde_json::Value = serde_json::from_str(&response)
-            .map_err(|e| format!("解析响应失败: {}", e))?;
-        log_info(&format!("embed_text 手动解析, 响应顶层类型: {:?}", top_level_type(&value)));
+        let value: serde_json::Value =
+            serde_json::from_str(&response).map_err(|e| format!("解析响应失败: {}", e))?;
+        log_info(&format!(
+            "embed_text 手动解析, 响应顶层类型: {:?}",
+            top_level_type(&value)
+        ));
         let vec = extract_embedding_vec(&value)?;
         log_info(&format!("embed_text 手动解析成功, 向量维数: {}", vec.len()));
         if vec.is_empty() {
@@ -144,11 +156,19 @@ fn extract_embedding_vec(response: &serde_json::Value) -> Result<Vec<f32>, Strin
             if let Some(inner) = emb[0].as_array() {
                 inner
                     .iter()
-                    .map(|v| v.as_f64().map(|f| f as f32).ok_or_else(|| "向量元素不是 f64".to_string()))
+                    .map(|v| {
+                        v.as_f64()
+                            .map(|f| f as f32)
+                            .ok_or_else(|| "向量元素不是 f64".to_string())
+                    })
                     .collect()
             } else {
                 emb.iter()
-                    .map(|v| v.as_f64().map(|f| f as f32).ok_or_else(|| "向量元素不是 f64".to_string()))
+                    .map(|v| {
+                        v.as_f64()
+                            .map(|f| f as f32)
+                            .ok_or_else(|| "向量元素不是 f64".to_string())
+                    })
                     .collect()
             }
         }

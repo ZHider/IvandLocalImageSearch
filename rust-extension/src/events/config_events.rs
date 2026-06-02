@@ -38,7 +38,6 @@ pub async fn handle_test_api_connection(token: &str, data: Value, write: &mut Ws
         config.base_url.trim_end_matches('/')
     ));
 
-
     let client = match embedding::create_client(&config) {
         Ok(c) => c,
         Err(e) => {
@@ -95,10 +94,7 @@ pub async fn handle_test_api_connection(token: &str, data: Value, write: &mut Ws
         }
         Err(e) => {
             log_error(&format!("health_check 失败: {}", e));
-            log_info(&format!(
-                "请确认 {} 正确且服务已启动",
-                config.base_url
-            ));
+            log_info(&format!("请确认 {} 正确且服务已启动", config.base_url));
             let _ = ws_client::send_broadcast(
                 token,
                 "apiConnectionResult",

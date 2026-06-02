@@ -79,10 +79,7 @@ struct IndexingContext {
     now: String,
 }
 
-async fn load_indexing_config(
-    token: &str,
-    write: &mut WsWriter,
-) -> Result<IndexingContext, ()> {
+async fn load_indexing_config(token: &str, write: &mut WsWriter) -> Result<IndexingContext, ()> {
     let app_config = match config::load_config_from_file() {
         Ok(c) => c,
         Err(e) => {
@@ -136,7 +133,9 @@ async fn load_indexing_config(
         }
     };
 
-    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+    let now = chrono::Utc::now()
+        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+        .to_string();
 
     Ok(IndexingContext {
         img_opts,
@@ -187,7 +186,10 @@ async fn analyze_diff<'a>(
     write: &mut WsWriter,
     scan_result: &'a scanner::ScanResult,
 ) -> Option<DiffResult<'a>> {
-    log_info(&format!("扫描到 {} 个文件，开始与数据库对比", scan_result.total));
+    log_info(&format!(
+        "扫描到 {} 个文件，开始与数据库对比",
+        scan_result.total
+    ));
     let existing_meta = match metadata::get_all_meta() {
         Ok(meta) => meta,
         Err(e) => {
@@ -296,7 +298,7 @@ async fn process_incremental_files(
 
     for entry in incremental {
         current_step += 1;
-        
+
         send_progress(
             token,
             write,
@@ -333,7 +335,10 @@ async fn process_incremental_files(
             {
                 Ok(entries) => {
                     let dim = entries.first().map(|e| e.vector.len()).unwrap_or(0);
-                    log_info(&format!("batch_upsert 图片 {} 向量维数: {}", entry.file_path, dim));
+                    log_info(&format!(
+                        "batch_upsert 图片 {} 向量维数: {}",
+                        entry.file_path, dim
+                    ));
                     if let Err(e) = store.batch_upsert(&entries).await {
                         error_count += 1;
                         log_error(&format!("写入向量存储失败 {}: {}", entry.file_path, e));
@@ -498,7 +503,7 @@ pub async fn handle_start_index(token: &str, data: Value, write: &mut WsWriter) 
     let new_count = diff.new_count;
     let modified_count = diff.modified_count;
     let deleted_count = diff.deleted_count;
-    
+
     let mut incremental: Vec<&scanner::FileEntry> = Vec::new();
     incremental.extend(diff.new_files);
     incremental.extend(diff.modified_files);
@@ -522,24 +527,46 @@ pub async fn handle_start_index(token: &str, data: Value, write: &mut WsWriter) 
 
     // 阶段 4：处理增量文件
     let proc_result = process_incremental_files(
-        token, write, &ctx.client, &mut ctx.store,
-        &incremental, 0, total_steps as u32,
-        new_count, modified_count, deleted_count, &ctx.now, &ctx.img_opts,
+        token,
+        write,
+        &ctx.client,
+        &mut ctx.store,
+        &incremental,
+        0,
+        total_steps as u32,
+        new_count,
+        modified_count,
+        deleted_count,
+        &ctx.now,
+        &ctx.img_opts,
     )
     .await;
 
     // 阶段 5：清理已删除文件
     cleanup_deleted_files(
-        token, write, &mut ctx.store,
-        &diff.deleted_files, proc_result.current_step, total_steps as u32,
-        new_count, modified_count, deleted_count, proc_result.error_count,
+        token,
+        write,
+        &mut ctx.store,
+        &diff.deleted_files,
+        proc_result.current_step,
+        total_steps as u32,
+        new_count,
+        modified_count,
+        deleted_count,
+        proc_result.error_count,
     )
     .await;
 
     // 阶段 6：创建索引并完成
     finalize_indexing(
-        token, write, &mut ctx.store,
-        &scan_result, new_count, modified_count, deleted_count, &proc_result,
+        token,
+        write,
+        &mut ctx.store,
+        &scan_result,
+        new_count,
+        modified_count,
+        deleted_count,
+        &proc_result,
     )
     .await;
 }
@@ -611,7 +638,9 @@ async fn process_image_file(
     let exif = image_processing::extract_exif(file_path).unwrap_or_default();
 
     let is_heic = matches!(
-        std::path::Path::new(file_path).extension().and_then(|e| e.to_str()),
+        std::path::Path::new(file_path)
+            .extension()
+            .and_then(|e| e.to_str()),
         Some("heic" | "heif")
     );
 
@@ -619,10 +648,14 @@ async fn process_image_file(
         // HEIC: 解码一次，同时用于缩略图 + WebP 缓存（避免重复解码 24MP）
         let img = image_processing::open_image(file_path)
             .map_err(|e| format!("解码 HEIC 失败: {}", e))?;
-        let thumb = image_processing::generate_thumbnail_from_img(&img, &file_hash, opts.thumbnail_size)
-            .unwrap_or_default();
+        let thumb =
+            image_processing::generate_thumbnail_from_img(&img, &file_hash, opts.thumbnail_size)
+                .unwrap_or_default();
         let webp = image_processing::convert_img_to_webp(
-            &img, &file_hash, opts.embed_image_size, constants::HEIC_TO_WEBP_QUALITY,
+            &img,
+            &file_hash,
+            opts.embed_image_size,
+            constants::HEIC_TO_WEBP_QUALITY,
         )?;
         (thumb, webp)
     } else {
@@ -631,10 +664,19 @@ async fn process_image_file(
         (thumb, file_path.to_string())
     };
 
-    log_info(&format!("process_image_file: 缩略图路径={}", thumbnail_path));
-    log_info(&format!("process_image_file: 调用 embed_image, path={}", embed_path));
+    log_info(&format!(
+        "process_image_file: 缩略图路径={}",
+        thumbnail_path
+    ));
+    log_info(&format!(
+        "process_image_file: 调用 embed_image, path={}",
+        embed_path
+    ));
     let vector = client.embed_image(&embed_path).await?;
-    log_info(&format!("process_image_file: embedding 完成, 向量维数={}", vector.len()));
+    log_info(&format!(
+        "process_image_file: embedding 完成, 向量维数={}",
+        vector.len()
+    ));
 
     let metadata = serde_json::json!({
         "file_path": file_path,
@@ -667,8 +709,7 @@ async fn process_text_file(
 ) -> Result<Vec<crate::vector_store::VectorEntry>, String> {
     log_info(&format!("处理文本: {}", file_path));
 
-    let content = std::fs::read_to_string(file_path)
-        .map_err(|e| format!("读取文件失败: {}", e))?;
+    let content = std::fs::read_to_string(file_path).map_err(|e| format!("读取文件失败: {}", e))?;
 
     let chunks = text_chunker::chunk_text(&content, chunk_size, chunk_overlap);
 

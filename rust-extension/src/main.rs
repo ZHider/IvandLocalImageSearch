@@ -1,9 +1,9 @@
 mod config;
 mod constants;
-mod event_dispatcher;
-mod file_utils;
 mod embedding;
+mod event_dispatcher;
 mod events;
+mod file_utils;
 mod hasher;
 mod image_processing;
 mod metadata;
@@ -12,11 +12,11 @@ mod text_chunker;
 mod vector_store;
 mod ws_client;
 
-use std::time::SystemTime;
 use std::io::Read;
+use std::time::SystemTime;
 
-use events::ProcessInput;
 use event_dispatcher::EventDispatcher;
+use events::ProcessInput;
 
 fn log(level: &str, msg: &str) {
     let now = SystemTime::now()

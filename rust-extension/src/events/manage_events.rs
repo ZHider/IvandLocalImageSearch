@@ -3,8 +3,8 @@
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::{log_error, log_info, metadata, vector_store::VectorStore};
 use crate::ws_client::{self, WsWriter};
+use crate::{log_error, log_info, metadata, vector_store::VectorStore};
 
 #[derive(Deserialize)]
 struct QueryIndexData {
@@ -20,8 +20,12 @@ struct QueryIndexData {
     page_size: u32,
 }
 
-fn default_page() -> u32 { 1 }
-fn default_page_size() -> u32 { 50 }
+fn default_page() -> u32 {
+    1
+}
+fn default_page_size() -> u32 {
+    50
+}
 
 #[derive(Deserialize)]
 struct DeleteIndexData {
@@ -82,7 +86,8 @@ pub async fn handle_query_index(token: &str, data: Value, write: &mut WsWriter) 
                 "queryIndexError",
                 serde_json::json!({ "error": e.to_string() }),
                 write,
-            ).await;
+            )
+            .await;
             return;
         }
     };
@@ -100,7 +105,8 @@ pub async fn handle_query_index(token: &str, data: Value, write: &mut WsWriter) 
                 "queryIndexError",
                 serde_json::json!({ "error": e.to_string() }),
                 write,
-            ).await;
+            )
+            .await;
             return;
         }
     };
@@ -133,7 +139,8 @@ pub async fn handle_query_index(token: &str, data: Value, write: &mut WsWriter) 
                 "queryIndexResult",
                 serde_json::json!({ "files": files, "total": total }),
                 write,
-            ).await;
+            )
+            .await;
         }
         Err(e) => {
             log_error(&format!("查询索引失败: {}", e));

@@ -1,7 +1,7 @@
-use std::io::Read;
-use serde::{Deserialize, Serialize};
-use crate::file_utils;
 use crate::constants;
+use crate::file_utils;
+use serde::{Deserialize, Serialize};
+use std::io::Read;
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct AppConfig {
@@ -20,7 +20,6 @@ pub struct AppConfig {
     #[serde(rename = "imageProcessing", default)]
     pub image_processing: ImageProcessingConfig,
 }
-
 
 fn default_thumbnail_size() -> u32 {
     constants::DEFAULT_THUMBNAIL_SIZE
@@ -59,11 +58,10 @@ pub fn save_config_to_file(config: AppConfig) -> Result<String, String> {
     ensure_data_dir().map_err(|e| format!("创建 data 目录失败: {}", e))?;
 
     let config_path = get_config_path();
-    let json = serde_json::to_string_pretty(&config)
-        .map_err(|e| format!("序列化配置失败: {}", e))?;
+    let json =
+        serde_json::to_string_pretty(&config).map_err(|e| format!("序列化配置失败: {}", e))?;
 
-    std::fs::write(&config_path, json)
-        .map_err(|e| format!("写入配置文件失败: {}", e))?;
+    std::fs::write(&config_path, json).map_err(|e| format!("写入配置文件失败: {}", e))?;
 
     Ok(format!("配置已保存到: {:?}", config_path))
 }
@@ -75,15 +73,15 @@ pub fn load_config_from_file() -> Result<AppConfig, String> {
         return Err("配置文件不存在".to_string());
     }
 
-    let mut file = std::fs::File::open(&config_path)
-        .map_err(|e| format!("打开配置文件失败: {}", e))?;
+    let mut file =
+        std::fs::File::open(&config_path).map_err(|e| format!("打开配置文件失败: {}", e))?;
 
     let mut contents = String::new();
     file.read_to_string(&mut contents)
         .map_err(|e| format!("读取配置文件失败: {}", e))?;
 
-    let config: AppConfig = serde_json::from_str(&contents)
-        .map_err(|e| format!("解析配置文件失败: {}", e))?;
+    let config: AppConfig =
+        serde_json::from_str(&contents).map_err(|e| format!("解析配置文件失败: {}", e))?;
 
     Ok(config)
 }

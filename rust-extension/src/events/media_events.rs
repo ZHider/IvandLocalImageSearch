@@ -1,9 +1,5 @@
 //! 媒体事件：缩略图生成、图片预览。
 
-use std::collections::HashSet;
-use base64::{engine::general_purpose::STANDARD, Engine};
-use serde::Deserialize;
-use serde_json::Value;
 use crate::constants;
 use crate::file_utils;
 use crate::hasher;
@@ -11,6 +7,10 @@ use crate::image_processing;
 use crate::log_error;
 use crate::log_info;
 use crate::ws_client::{self, WsWriter};
+use base64::{engine::general_purpose::STANDARD, Engine};
+use serde::Deserialize;
+use serde_json::Value;
+use std::collections::HashSet;
 
 #[derive(Deserialize)]
 struct ThumbnailRequest {
@@ -59,7 +59,8 @@ pub async fn handle_get_thumbnail(token: &str, data: Value, write: &mut WsWriter
                     "thumbnailPath": path,
                 }),
                 write,
-            ).await;
+            )
+            .await;
         }
         Err(e) => {
             log_error(&format!("生成缩略图失败: {}", e));
@@ -71,11 +72,11 @@ pub async fn handle_get_thumbnail(token: &str, data: Value, write: &mut WsWriter
                     "imagePath": req.image_path,
                 }),
                 write,
-            ).await;
+            )
+            .await;
         }
     }
 }
-
 
 pub async fn handle_get_preview(token: &str, data: Value, write: &mut WsWriter) {
     log_info("处理 getPreview 事件");
@@ -107,7 +108,9 @@ pub async fn handle_get_preview(token: &str, data: Value, write: &mut WsWriter) 
         // HEIC 浏览器无法渲染，优先读取缓存的 data/images/{hash}.webp
         let hash = hasher::compute_blake3_hex(std::path::Path::new(&image_path)).ok();
         let cached = hash.as_ref().and_then(|h| {
-            let p = file_utils::get_data_dir().join("images").join(format!("{}.webp", h));
+            let p = file_utils::get_data_dir()
+                .join("images")
+                .join(format!("{}.webp", h));
             p.exists().then_some(p)
         });
 
@@ -127,22 +130,32 @@ pub async fn handle_get_preview(token: &str, data: Value, write: &mut WsWriter) 
                         // 保存落盘
                         if let Some(h) = &hash {
                             let _ = image_processing::convert_img_to_webp(
-                                &img, h, constants::DEFAULT_EMBEDDING_RESIZE, constants::HEIC_TO_WEBP_QUALITY,
+                                &img,
+                                h,
+                                constants::DEFAULT_EMBEDDING_RESIZE,
+                                constants::HEIC_TO_WEBP_QUALITY,
                             );
                         }
                         // 从缓存文件读取（或内存兜底）
-                        let data = hash.as_ref().and_then(|h| {
-                            let p = file_utils::get_data_dir().join("images").join(format!("{}.webp", h));
-                            std::fs::read(&p).ok()
-                        }).or_else(|| {
-                            // 落盘失败时的兜底：内存编码
-                            let mut buf = std::io::Cursor::new(Vec::new());
-                            img.write_to(&mut buf, image::ImageFormat::WebP).ok()?;
-                            Some(buf.into_inner())
-                        });
+                        let data = hash
+                            .as_ref()
+                            .and_then(|h| {
+                                let p = file_utils::get_data_dir()
+                                    .join("images")
+                                    .join(format!("{}.webp", h));
+                                std::fs::read(&p).ok()
+                            })
+                            .or_else(|| {
+                                // 落盘失败时的兜底：内存编码
+                                let mut buf = std::io::Cursor::new(Vec::new());
+                                img.write_to(&mut buf, image::ImageFormat::WebP).ok()?;
+                                Some(buf.into_inner())
+                            });
 
                         match data {
-                            Some(bytes) => Ok(format!("data:image/webp;base64,{}", STANDARD.encode(bytes))),
+                            Some(bytes) => {
+                                Ok(format!("data:image/webp;base64,{}", STANDARD.encode(bytes)))
+                            }
                             None => Err("编码 WebP 失败".to_string()),
                         }
                     }
@@ -194,7 +207,6 @@ pub async fn handle_get_preview(token: &str, data: Value, write: &mut WsWriter) 
     }
 }
 
-
 /// 清空全部缩略图
 pub async fn handle_clear_all_thumbnails(token: &str, write: &mut WsWriter) {
     log_info("处理 clearAllThumbnails 事件");
@@ -206,7 +218,8 @@ pub async fn handle_clear_all_thumbnails(token: &str, write: &mut WsWriter) {
             "clearAllThumbnailsComplete",
             serde_json::json!({ "deleted": 0 }),
             write,
-        ).await;
+        )
+        .await;
         return;
     }
 
@@ -226,7 +239,8 @@ pub async fn handle_clear_all_thumbnails(token: &str, write: &mut WsWriter) {
         "clearAllThumbnailsComplete",
         serde_json::json!({ "deleted": deleted }),
         write,
-    ).await;
+    )
+    .await;
 }
 
 /// 清除过期缩略图：从元数据 SQLite 中加载全部文件哈希到 HashSet，
@@ -242,7 +256,8 @@ pub async fn handle_clear_expired_thumbnails(token: &str, write: &mut WsWriter) 
             "clearExpiredThumbnailsComplete",
             serde_json::json!({ "deleted": 0 }),
             write,
-        ).await;
+        )
+        .await;
         return;
     }
 
@@ -256,7 +271,8 @@ pub async fn handle_clear_expired_thumbnails(token: &str, write: &mut WsWriter) 
                 "clearExpiredThumbnailsError",
                 serde_json::json!({ "error": format!("读取元数据失败: {}", e) }),
                 write,
-            ).await;
+            )
+            .await;
             return;
         }
     };
@@ -265,12 +281,20 @@ pub async fn handle_clear_expired_thumbnails(token: &str, write: &mut WsWriter) 
         .into_iter()
         .flatten()
         .flatten()
-        .filter(|e| e.path().extension().map(|ext| ext == "webp").unwrap_or(false))
+        .filter(|e| {
+            e.path()
+                .extension()
+                .map(|ext| ext == "webp")
+                .unwrap_or(false)
+        })
         .collect();
 
     let total = entries.len();
-    log_info(&format!("clearExpiredThumbnails: 共 {} 个缩略图, 元数据 {} 条哈希",
-        total, valid_hashes.len()));
+    log_info(&format!(
+        "clearExpiredThumbnails: 共 {} 个缩略图, 元数据 {} 条哈希",
+        total,
+        valid_hashes.len()
+    ));
 
     if total == 0 {
         let _ = ws_client::send_broadcast(
@@ -278,7 +302,8 @@ pub async fn handle_clear_expired_thumbnails(token: &str, write: &mut WsWriter) 
             "clearExpiredThumbnailsComplete",
             serde_json::json!({ "deleted": 0, "total": 0 }),
             write,
-        ).await;
+        )
+        .await;
         return;
     }
 
@@ -286,7 +311,8 @@ pub async fn handle_clear_expired_thumbnails(token: &str, write: &mut WsWriter) 
 
     for (i, entry) in entries.iter().enumerate() {
         let path = entry.path();
-        let stem = path.file_stem()
+        let stem = path
+            .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("")
             .to_string();
@@ -308,15 +334,20 @@ pub async fn handle_clear_expired_thumbnails(token: &str, write: &mut WsWriter) 
                     "deleted": deleted,
                 }),
                 write,
-            ).await;
+            )
+            .await;
         }
     }
 
-    log_info(&format!("clearExpiredThumbnails: 完成，删除了 {} 个过期缩略图", deleted));
+    log_info(&format!(
+        "clearExpiredThumbnails: 完成，删除了 {} 个过期缩略图",
+        deleted
+    ));
     let _ = ws_client::send_broadcast(
         token,
         "clearExpiredThumbnailsComplete",
         serde_json::json!({ "deleted": deleted, "total": total }),
         write,
-    ).await;
+    )
+    .await;
 }

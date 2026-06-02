@@ -7,7 +7,38 @@ fn is_chinese_char(c: char) -> bool {
 fn is_punctuation(c: char) -> bool {
     matches!(
         c,
-        ',' | '.' | '!' | '?' | ';' | ':' | '"' | '\'' | '(' | ')' | '[' | ']' | '{' | '}' | '，' | '。' | '！' | '？' | '；' | '：' | '「' | '」' | '『' | '』' | '（' | '）' | '【' | '】' | '《' | '》' | '…' | '—' | '～'
+        ',' | '.'
+            | '!'
+            | '?'
+            | ';'
+            | ':'
+            | '"'
+            | '\''
+            | '('
+            | ')'
+            | '['
+            | ']'
+            | '{'
+            | '}'
+            | '，'
+            | '。'
+            | '！'
+            | '？'
+            | '；'
+            | '：'
+            | '「'
+            | '」'
+            | '『'
+            | '』'
+            | '（'
+            | '）'
+            | '【'
+            | '】'
+            | '《'
+            | '》'
+            | '…'
+            | '—'
+            | '～'
     )
 }
 
@@ -141,14 +172,16 @@ mod tests {
 
     #[test]
     fn test_simple_english() {
-        let text = "Hello world this is a test of the chunking system for simple English text processing.";
+        let text =
+            "Hello world this is a test of the chunking system for simple English text processing.";
         let chunks = chunk_text(text, 10, 2);
         assert!(!chunks.is_empty());
     }
 
     #[test]
     fn test_chinese() {
-        let text = "这是一段中文测试文本，用于验证分块系统的正确性。我们希望它能够正确处理中文字符。";
+        let text =
+            "这是一段中文测试文本，用于验证分块系统的正确性。我们希望它能够正确处理中文字符。";
         let chunks = chunk_text(text, 10, 2);
         assert!(!chunks.is_empty());
     }
