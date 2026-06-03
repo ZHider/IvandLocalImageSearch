@@ -38,7 +38,7 @@
       "minHeight": 600,
       "fullScreen": false,
       "alwaysOnTop": false,
-      "enableInspector": true,
+      "enableInspector": false,
       "borderless": false,
       "maximize": true,
       "hidden": false,
