@@ -1,16 +1,10 @@
 <script setup lang="ts">
 import type { IndexResult } from '../types'
+import { formatSize } from '../utils/format'
 
 defineProps<{
   result: IndexResult | null
 }>()
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-  if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
-  return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB'
-}
 </script>
 
 <template>

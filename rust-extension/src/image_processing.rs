@@ -237,3 +237,43 @@ pub fn generate_thumbnail(path: &str, size: u32) -> Result<String> {
     let img = open_image(path)?;
     generate_thumbnail_from_img(&img, &file_hash, size)
 }
+
+// ---- 异步包装层（避免阻塞 tokio 工作线程） ----
+
+/// 异步版本的 `open_image`，将同步 I/O 放到 `spawn_blocking` 线程池中执行。
+pub(crate) async fn open_image_async(path: String) -> Result<DynamicImage> {
+    tokio::task::spawn_blocking(move || open_image(&path))
+        .await
+        .context("spawn_blocking 执行 open_image 失败")?
+}
+
+/// 异步版本的 `generate_thumbnail_from_img`，将 CPU 密集和同步 I/O 放到独立线程池中执行。
+pub(crate) async fn generate_thumbnail_from_img_async(
+    img: DynamicImage,
+    hash: String,
+    size: u32,
+) -> Result<String> {
+    tokio::task::spawn_blocking(move || generate_thumbnail_from_img(&img, &hash, size))
+        .await
+        .context("spawn_blocking 执行 generate_thumbnail_from_img 失败")?
+}
+
+/// 异步版本的 `convert_img_to_webp`。
+pub(crate) async fn convert_img_to_webp_async(
+    img: DynamicImage,
+    hash: String,
+    max_size: u32,
+    quality: f32,
+) -> Result<String> {
+    tokio::task::spawn_blocking(move || convert_img_to_webp(&img, &hash, max_size, quality))
+        .await
+        .context("spawn_blocking 执行 convert_img_to_webp 失败")?
+}
+
+/// 异步版本的 `generate_thumbnail`（从文件路径生成缩略图）。
+pub async fn generate_thumbnail_async(path: String, size: u32) -> Result<String> {
+    let path_clone = path.clone();
+    tokio::task::spawn_blocking(move || generate_thumbnail(&path_clone, size))
+        .await
+        .context("spawn_blocking 执行 generate_thumbnail 失败")?
+}

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { SearchResult } from '../types'
+import { formatSize, getSimilarityColor } from '../utils/format'
 
 defineProps<{
   item: SearchResult
@@ -12,21 +13,8 @@ const emit = defineEmits<{
   thumbnailError: []
 }>()
 
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-  if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
-  return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB'
-}
-
 function formatSimilarity(sim: number): string {
   return sim.toFixed(1) + '%'
-}
-
-function getSimilarityColor(sim: number): string {
-  if (sim >= 0.8) return '#18a058'
-  if (sim >= 0.6) return '#f0a020'
-  return '#666'
 }
 </script>
 

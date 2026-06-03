@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, onMounted, onUnmounted, provide } from 'vue'
 import { RouterView, useRouter, useRoute } from 'vue-router'
 import type { MenuOption } from 'naive-ui'
+import { useExtension } from './composables/useExtension'
 
 const router = useRouter()
 const route = useRoute()
+const { on } = useExtension()
+
 const menuOptions: MenuOption[] = [
   {
     label: '🔍 搜索',
@@ -21,6 +24,10 @@ const menuOptions: MenuOption[] = [
 ]
 
 const activeKey = ref<string>('search')
+const indexing = ref(false)
+
+// 提供给子组件（如 IndexPage）使用，确保索引状态全局同步
+provide('indexing', indexing)
 
 watch(
   () => route.path,
@@ -39,8 +46,30 @@ watch(
 )
 
 function handleMenuUpdate(key: string) {
+  if (indexing.value) return
   router.push(`/${key}`)
 }
+
+const cleanups: (() => void)[] = []
+
+onMounted(() => {
+  cleanups.push(
+    on('indexProgress', () => {
+      indexing.value = true
+    }),
+    on('indexComplete', () => {
+      indexing.value = false
+    }),
+    on('indexError', () => {
+      indexing.value = false
+    }),
+  )
+})
+
+onUnmounted(() => {
+  cleanups.forEach(stop => stop())
+  indexing.value = false
+})
 </script>
 
 <template>
@@ -53,8 +82,12 @@ function handleMenuUpdate(key: string) {
             :options="menuOptions"
             mode="horizontal"
             class="nav-menu"
+            :disabled="indexing"
             @update:value="handleMenuUpdate"
           />
+          <n-tag v-if="indexing" type="warning" size="small" class="indexing-tag">
+            🔒 索引进行中
+          </n-tag>
         </div>
       </n-layout-header>
       <n-layout-content class="content">
@@ -98,6 +131,11 @@ function handleMenuUpdate(key: string) {
 
 .nav-menu {
   flex-shrink: 0;
+}
+
+.indexing-tag {
+  flex-shrink: 0;
+  margin-left: 12px;
 }
 
 .content {

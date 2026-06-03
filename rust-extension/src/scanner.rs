@@ -25,7 +25,19 @@ pub struct ScanResult {
     pub total: usize,
 }
 
-pub fn scan_folders(folders: &[String]) -> Result<ScanResult> {
+/// 带进度回调的扫描版本，每发现一个有效文件就调用 `on_progress(count, file_path)`。
+/// 如果不需要进度，传入空闭包即可。
+pub fn scan_folders_with_progress<F>(folders: &[String], mut on_progress: F) -> Result<ScanResult>
+where
+    F: FnMut(usize, &str),
+{
+    scan_folders_inner(folders, &mut on_progress)
+}
+
+fn scan_folders_inner<F>(folders: &[String], on_progress: &mut F) -> Result<ScanResult>
+where
+    F: FnMut(usize, &str),
+{
     let mut files = Vec::new();
 
     for folder in folders {
@@ -79,6 +91,10 @@ pub fn scan_folders(folders: &[String]) -> Result<ScanResult> {
                 modified_at,
                 file_hash,
             });
+
+            // 每发现一个文件就通知进度（包含当前文件路径）
+            let file_path = files.last().unwrap().file_path.as_str();
+            on_progress(files.len(), file_path);
         }
     }
 

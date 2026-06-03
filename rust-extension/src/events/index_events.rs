@@ -3,9 +3,10 @@
 use std::collections::HashMap;
 
 use anyhow::Context;
-use futures_util::StreamExt;
+use futures_util::{future, StreamExt};
 use serde::Deserialize;
 use serde_json::Value;
+use tokio::sync::mpsc;
 
 use crate::config;
 use crate::constants;
@@ -25,7 +26,7 @@ use super::config_to_api_config;
 #[derive(Deserialize)]
 struct StartIndexData {
     folders: Vec<String>,
-    #[serde(default = "default_embed_threads")]
+    #[serde(rename = "embedThreads", default = "default_embed_threads")]
     embed_threads: usize,
 }
 
@@ -177,10 +178,75 @@ async fn perform_scan(
     folders: &[String],
 ) -> Option<scanner::ScanResult> {
     log_info(&format!("扫描文件夹: {:?}", folders));
-    match scanner::scan_folders(folders) {
-        Ok(r) => Some(r),
-        Err(e) => {
+    let folders_owned = folders.to_vec();
+    let token_owned = token.to_string();
+
+    // 使用 channel 在扫描过程中实时发送进度
+    let (tx, mut rx) = mpsc::unbounded_channel::<(usize, String)>();
+
+    let scan_handle = tokio::task::spawn_blocking(move || {
+        scanner::scan_folders_with_progress(&folders_owned, |count, path| {
+            let _ = tx.send((count, path.to_string()));
+        })
+    });
+
+    // 边扫描边发送进度（每 10 个文件发送一次，避免 WebSocket 洪泛）
+    let mut last_sent = 0usize;
+    let mut last_count = 0usize;
+    let mut last_path = String::new();
+    while let Some((count, path)) = rx.recv().await {
+        last_count = count;
+        last_path = path;
+        if count - last_sent >= 10 {
+            last_sent = count;
+            let _ = ws_client::send_broadcast(
+                &token_owned,
+                "indexProgress",
+                serde_json::json!({
+                    "phase": "scanning",
+                    "current": count,
+                    "total": 1,
+                    "percentage": 0,
+                    "currentFile": last_path,
+                }),
+                write,
+            )
+            .await;
+        }
+    }
+
+    // 发送最后一批进度（确保不足 10 个的尾巴也显示）
+    if last_count > last_sent {
+        let _ = ws_client::send_broadcast(
+            &token_owned,
+            "indexProgress",
+            serde_json::json!({
+                "phase": "scanning",
+                "current": last_count,
+                "total": 1,
+                "percentage": 0,
+                "currentFile": last_path,
+            }),
+            write,
+        )
+        .await;
+    }
+
+    match scan_handle.await {
+        Ok(Ok(r)) => Some(r),
+        Ok(Err(e)) => {
             log_error(&format!("扫描失败: {}", e));
+            let _ = ws_client::send_broadcast(
+                token,
+                "indexError",
+                serde_json::json!({ "error": e.to_string() }),
+                write,
+            )
+            .await;
+            None
+        }
+        Err(e) => {
+            log_error(&format!("扫描线程异常: {}", e));
             let _ = ws_client::send_broadcast(
                 token,
                 "indexError",
@@ -550,18 +616,21 @@ pub async fn handle_start_index(token: &str, data: Value, write: &mut WsWriter) 
     }
 
     // 阶段 1：加载配置（直接传入前端传来的线程数）
+    send_progress(token, write, "preparing", 0, 1, None).await;
     let mut ctx = match load_indexing_config(token, write, index_data.embed_threads).await {
         Ok(c) => c,
         Err(()) => return,
     };
 
     // 阶段 2：扫描文件系统
+    send_progress(token, write, "scanning", 0, 1, None).await;
     let scan_result = match perform_scan(token, write, &index_data.folders).await {
         Some(r) => r,
         None => return,
     };
 
     // 阶段 3：差异分析
+    send_progress(token, write, "comparing", 0, 1, None).await;
     let diff = match analyze_diff(token, write, &scan_result).await {
         Some(d) => d,
         None => return,
@@ -746,24 +815,28 @@ async fn optimize_lancedb(token: &str, write: &mut WsWriter, store: &VectorStore
 
 // ---- 文件处理器 ----
 
-/// 解码图片并生成缩略图，返回 (解码后的图片, 缩略图路径)
-fn decode_and_generate_thumbnail(
+/// 异步解码图片并生成缩略图，避免阻塞 tokio 工作线程
+async fn decode_and_generate_thumbnail_async(
     file_path: &str,
     file_hash: &str,
     thumbnail_size: u32,
 ) -> anyhow::Result<(image::DynamicImage, String)> {
-    let img = image_processing::open_image(file_path)
+    let img = image_processing::open_image_async(file_path.to_string())
+        .await
         .map_err(|e| anyhow::anyhow!("解码图片失败 ({}): {}", file_path, e))?;
-    let thumb = image_processing::generate_thumbnail_from_img(&img, file_hash, thumbnail_size)
-        .unwrap_or_default();
+    let thumb = image_processing::generate_thumbnail_from_img_async(
+        img.clone(),
+        file_hash.to_string(),
+        thumbnail_size,
+    )
+    .await
+    .unwrap_or_default();
     Ok((img, thumb))
 }
 
-/// 根据高级选项决定 embedding 用图片的路径：
-/// - 原生格式小文件直接发送原文件
-/// - 否则缩放并转为 WebP 缓存再发送
-fn resolve_embed_path(
-    img: &image::DynamicImage,
+/// 异步版本：根据高级选项决定 embedding 用图片的路径
+async fn resolve_embed_path_async(
+    img: image::DynamicImage,
     file_path: &str,
     file_hash: &str,
     file_size: u64,
@@ -785,7 +858,13 @@ fn resolve_embed_path(
         } else {
             constants::DEFAULT_WEBP_QUALITY
         };
-        image_processing::convert_img_to_webp(img, file_hash, embed_image_size, quality)
+        image_processing::convert_img_to_webp_async(
+            img,
+            file_hash.to_string(),
+            embed_image_size,
+            quality,
+        )
+        .await
     } else {
         Ok(file_path.to_string())
     }
@@ -804,20 +883,23 @@ async fn process_image_file(
     log_info(&format!("process_image_file: 开始处理 {}", file_path));
     let exif = image_processing::extract_exif(file_path).unwrap_or_default();
 
-    let (img, thumbnail_path) = decode_and_generate_thumbnail(
+    // 使用异步版本，避免阻塞 tokio 工作线程
+    let (img, thumbnail_path) = decode_and_generate_thumbnail_async(
         file_path,
         &file_hash,
         opts.thumbnail_size,
-    )?;
+    )
+    .await?;
 
-    let embed_path = resolve_embed_path(
-        &img,
+    let embed_path = resolve_embed_path_async(
+        img,
         file_path,
         &file_hash,
         file_size,
         opts.embed_image_size,
         advanced_options,
-    )?;
+    )
+    .await?;
 
     log_info(&format!(
         "process_image_file: 缩略图路径={}",
@@ -864,7 +946,9 @@ async fn process_text_file(
 ) -> anyhow::Result<Vec<crate::vector_store::VectorEntry>> {
     log_info(&format!("处理文本: {}", file_path));
 
-    let content = std::fs::read_to_string(file_path)
+    // 使用异步 I/O，避免阻塞 tokio 工作线程
+    let content = tokio::fs::read_to_string(file_path)
+        .await
         .context("读取文件失败")?;
 
     let chunks = text_chunker::chunk_text(&content, chunk_size, chunk_overlap);
@@ -874,12 +958,23 @@ async fn process_text_file(
     }
 
     let total_chunks = chunks.len();
-    let mut entries = Vec::with_capacity(total_chunks);
 
+    // 并发发送所有 chunk 的 embedding 请求，不再串行等待
+    let mut futures = Vec::with_capacity(total_chunks);
     for (idx, chunk) in chunks.iter().enumerate() {
-        let vector = client.embed_text(chunk).await?;
-        log_info(&format!("文本 chunk {} 向量维数: {}", idx, vector.len()));
+        let chunk_owned = chunk.clone();
+        futures.push(async move {
+            let vector = client.embed_text(&chunk_owned).await?;
+            log_info(&format!("文本 chunk {} 向量维数: {}", idx, vector.len()));
+            Ok::<_, anyhow::Error>((idx, vector))
+        });
+    }
 
+    let results = future::join_all(futures).await;
+
+    let mut entries = Vec::with_capacity(total_chunks);
+    for result in results {
+        let (idx, vector) = result?;
         let entry_id = format!("{}__chunk_{}", file_path, idx);
 
         entries.push(crate::vector_store::VectorEntry {
@@ -893,7 +988,7 @@ async fn process_text_file(
                 "file_type": "text",
                 "chunk_index": idx,
                 "total_chunks": total_chunks,
-                "chunk_text": chunk,
+                "chunk_text": chunks[idx],
             }),
         });
     }

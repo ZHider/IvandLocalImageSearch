@@ -6,11 +6,13 @@ defineProps<{
 }>()
 
 const phaseLabels: Record<string, string> = {
+  preparing: '准备中',
   scanning: '扫描文件',
-  compare: '对比差异',
+  comparing: '对比差异',
   processing: '处理文件',
   indexing: '更新索引',
   cleanup: '清理旧数据',
+  optimizing: '优化中',
 }
 </script>
 
@@ -29,7 +31,12 @@ const phaseLabels: Record<string, string> = {
         :fill-border-radius="0"
       />
       <n-text depth="3">
-        进度: {{ progress.current }} / {{ progress.total }}
+        <template v-if="progress.phase === 'scanning'">
+          已扫描: {{ progress.current }}
+        </template>
+        <template v-else>
+          进度: {{ progress.current }} / {{ progress.total }}
+        </template>
       </n-text>
       <n-text v-if="progress.currentFile" depth="3" class="current-file">
         📄 {{ progress.currentFile }}

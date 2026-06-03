@@ -37,3 +37,15 @@ pub const MIN_EMBED_THREADS: usize = 1;
 pub const MAX_EMBED_THREADS: usize = 16;
 /// 默认并发线程数
 pub const DEFAULT_EMBED_THREADS: usize = 1;
+
+// ---- HTTP 客户端配置 ----
+/// HTTP 请求超时（秒）
+pub const HTTP_TIMEOUT_SECS: u64 = 120;
+/// HTTP 连接超时（秒）
+pub const HTTP_CONNECT_TIMEOUT_SECS: u64 = 10;
+/// 每个 host 最大空闲连接数
+pub const HTTP_POOL_MAX_IDLE_PER_HOST: usize = 20;
+/// 空闲连接超时（秒）
+pub const HTTP_POOL_IDLE_TIMEOUT_SECS: u64 = 90;
+/// TCP keepalive 间隔（秒）
+pub const HTTP_TCP_KEEPALIVE_SECS: u64 = 60;

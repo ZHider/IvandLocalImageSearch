@@ -3,11 +3,13 @@
 //! 使用 vLLM /v1/embeddings 端点的 Chat Embeddings 扩展协议。
 //! 纯文本和图片均通过 `messages` 数组传入，适合多模态模型。
 
+use crate::constants;
 use crate::log_info;
 use anyhow::{Context, Result};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::time::Duration;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ApiConfig {
@@ -196,6 +198,11 @@ impl ApiClient {
 
         let client = reqwest::Client::builder()
             .default_headers(headers)
+            .timeout(Duration::from_secs(constants::HTTP_TIMEOUT_SECS))
+            .connect_timeout(Duration::from_secs(constants::HTTP_CONNECT_TIMEOUT_SECS))
+            .pool_max_idle_per_host(constants::HTTP_POOL_MAX_IDLE_PER_HOST)
+            .pool_idle_timeout(Duration::from_secs(constants::HTTP_POOL_IDLE_TIMEOUT_SECS))
+            .tcp_keepalive(Duration::from_secs(constants::HTTP_TCP_KEEPALIVE_SECS))
             .build()
             .expect("构建 reqwest Client 失败");
 

@@ -48,14 +48,15 @@ pub async fn handle_get_thumbnail(token: &str, data: Value, write: &mut WsWriter
         return;
     }
 
-    match image_processing::generate_thumbnail(&req.image_path, constants::DEFAULT_THUMBNAIL_SIZE) {
+    let image_path = req.image_path.clone();
+    match image_processing::generate_thumbnail_async(req.image_path, constants::DEFAULT_THUMBNAIL_SIZE).await {
         Ok(path) => {
             log_info(&format!("getThumbnail 成功: {}", path));
             let _ = ws_client::send_broadcast(
                 token,
                 "thumbnailReady",
                 serde_json::json!({
-                    "imagePath": req.image_path,
+                    "imagePath": image_path,
                     "thumbnailPath": path,
                 }),
                 write,
@@ -69,7 +70,7 @@ pub async fn handle_get_thumbnail(token: &str, data: Value, write: &mut WsWriter
                 "thumbnailError",
                 serde_json::json!({
                     "error": e.to_string(),
-                    "imagePath": req.image_path,
+                    "imagePath": image_path,
                 }),
                 write,
             )
@@ -117,7 +118,7 @@ pub async fn handle_get_preview(token: &str, data: Value, write: &mut WsWriter) 
         match cached {
             Some(path) => {
                 log_info(&format!("getPreview: HEIC 缓存命中 {}", path.display()));
-                match std::fs::read(&path) {
+                match tokio::fs::read(&path).await {
                     Ok(bytes) => Ok(format!("data:image/webp;base64,{}", STANDARD.encode(bytes))),
                     Err(e) => Err(format!("读取缓存失败: {}", e)),
                 }
@@ -125,16 +126,17 @@ pub async fn handle_get_preview(token: &str, data: Value, write: &mut WsWriter) 
             None => {
                 log_info("getPreview: HEIC 缓存未命中，解码并落盘");
                 // 解码 → 保存到 data/images/（下次命中）→ 再读取返回
-                match image_processing::open_image(&image_path) {
+                match image_processing::open_image_async(image_path.clone()).await {
                     Ok(img) => {
                         // 保存落盘
                         if let Some(h) = &hash {
-                            let _ = image_processing::convert_img_to_webp(
-                                &img,
-                                h,
+                            let _ = image_processing::convert_img_to_webp_async(
+                                img.clone(),
+                                h.clone(),
                                 constants::DEFAULT_EMBEDDING_RESIZE,
                                 constants::HEIC_TO_WEBP_QUALITY,
-                            );
+                            )
+                            .await;
                         }
                         // 从缓存文件读取（或内存兜底）
                         let data = hash
@@ -172,7 +174,7 @@ pub async fn handle_get_preview(token: &str, data: Value, write: &mut WsWriter) 
             "bmp" => "image/bmp",
             _ => "image/jpeg",
         };
-        match std::fs::read(&image_path) {
+        match tokio::fs::read(&image_path).await {
             Ok(bytes) => Ok(format!("data:{};base64,{}", mime, STANDARD.encode(bytes))),
             Err(e) => Err(format!("读取原图失败: {}", e)),
         }

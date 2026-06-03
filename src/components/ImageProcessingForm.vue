@@ -33,8 +33,8 @@ const emit = defineEmits<{
           HEIC 转 WebP 时缩放的最长边像素，默认 1280
         </n-text>
       </n-form-item>
-      <n-divider>缩略图</n-divider>
 
+      <n-divider>缩略图</n-divider>
       <n-form-item label="最长边尺寸 (px)">
         <n-input-number
           v-model:value="config.imageProcessing.thumbnailSize"
@@ -48,26 +48,6 @@ const emit = defineEmits<{
         </n-text>
       </n-form-item>
 
-      <n-form-item>
-        <n-button
-          type="primary"
-          @click="emit('save')"
-          :loading="saving"
-          :disabled="loading"
-        >
-          保存配置
-        </n-button>
-      </n-form-item>
-    </n-form>
-  </n-card>
-
-  <n-card :bordered="false" style="margin-top: 16px;">
-    <n-form
-      :model="config"
-      label-placement="left"
-      label-width="140"
-      require-mark-placement="right-hanging"
-    >
       <n-divider>索引性能</n-divider>
       <n-form-item label="并发线程数">
         <n-input-number

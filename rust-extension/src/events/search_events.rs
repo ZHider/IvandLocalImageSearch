@@ -22,6 +22,12 @@ struct SearchQuery {
     text: Option<String>,
     #[serde(rename = "imagePath")]
     image_path: Option<String>,
+    /// 分页偏移量（从第几条开始），默认 0
+    #[serde(default)]
+    offset: usize,
+    /// 每批返回数量，默认使用 DEFAULT_TOP_K
+    #[serde(default)]
+    limit: Option<usize>,
 }
 
 // ---- 搜索管道：阶段化处理 ----
@@ -102,10 +108,12 @@ async fn generate_query_vector(
     }
 }
 
-/// 阶段 2：执行向量搜索
+/// 阶段 2：执行向量搜索（支持分页）
 async fn perform_search(
     store: &VectorStore,
     query_vector: &[f32],
+    offset: usize,
+    limit: usize,
     token: &str,
     write: &mut WsWriter,
 ) -> Option<Vec<vector_store::SearchResult>> {
@@ -122,9 +130,14 @@ async fn perform_search(
         return None;
     }
 
-    let top_k = constants::DEFAULT_TOP_K;
+    // 计算需要从 LanceDB 获取的总数：offset + limit
+    let top_k = offset + limit;
     match store.search(query_vector, top_k).await {
-        Ok(r) => Some(r),
+        Ok(r) => {
+            // 跳过前 offset 条（LanceDB 可能不支持原生 offset，故手动截取）
+            let results: Vec<_> = r.into_iter().skip(offset).collect();
+            Some(results)
+        }
         Err(e) => {
             log_error(&format!("向量搜索失败: {}", e));
             let _ = ws_client::send_broadcast(
@@ -265,8 +278,11 @@ pub async fn handle_search(token: &str, data: Value, write: &mut WsWriter) {
         }
     };
 
+    // 计算实际的 limit（默认使用 DEFAULT_TOP_K）
+    let limit = query.limit.unwrap_or(constants::DEFAULT_TOP_K);
+
     // 阶段 2：执行向量搜索
-    let raw_results = match perform_search(&store, &query_vector, token, write).await {
+    let raw_results = match perform_search(&store, &query_vector, query.offset, limit, token, write).await {
         Some(r) => r,
         None => return,
     };
@@ -280,19 +296,22 @@ pub async fn handle_search(token: &str, data: Value, write: &mut WsWriter) {
     // 阶段 4：格式化结果
     let results = format_search_result(&deduped);
 
-    // 发送搜索结果
+    // 发送搜索结果（附带分页信息）
+    let has_more = raw_results.len() >= limit;
     let _ = ws_client::send_broadcast(
         token,
         "searchResult",
         serde_json::json!({
             "results": results,
             "total": results.len(),
+            "offset": query.offset,
+            "hasMore": has_more,
         }),
         write,
     )
     .await;
 
-    log_info(&format!("搜索完成，返回 {} 个去重结果", results.len()));
+    log_info(&format!("搜索完成，返回 {} 个去重结果（offset={}, hasMore={}）", results.len(), query.offset, has_more));
 }
 
 // ---- 辅助函数：创建搜索客户端 ----

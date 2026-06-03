@@ -13,6 +13,8 @@ const { send, on } = useExtension()
 const searchText = ref('')
 const searchImagePath = ref('')
 const searching = ref(false)
+const loadingMore = ref(false)
+const hasMore = ref(true)
 const results = ref<SearchResult[]>([])
 const previewImage = ref<string | null>(null)
 const previewLoading = ref(false)
@@ -23,6 +25,7 @@ const scrollTop = ref(0)
 const containerHeight = ref(600)
 
 const ITEM_HEIGHT = 260
+const PAGE_SIZE = 50
 const COLUMNS = computed(() => {
   const width = containerRef.value?.clientWidth ?? 800
   if (width > 1200) return 4
@@ -36,7 +39,38 @@ function onContainerScroll() {
   if (containerRef.value) {
     scrollTop.value = containerRef.value.scrollTop
     containerHeight.value = containerRef.value.clientHeight
+
+    // 无限滚动：接近底部时自动加载更多
+    const el = containerRef.value
+    const threshold = 300 // 距离底部 300px 时触发
+    if (
+      !loadingMore.value &&
+      hasMore.value &&
+      el.scrollTop + el.clientHeight >= el.scrollHeight - threshold
+    ) {
+      loadMore()
+    }
   }
+}
+
+function loadMore() {
+  if (loadingMore.value || !hasMore.value) return
+  loadingMore.value = true
+
+  const payload: Record<string, unknown> = {
+    offset: results.value.length,
+    limit: PAGE_SIZE,
+  }
+
+  if (searchImagePath.value) {
+    payload.type = 'image'
+    payload.imagePath = searchImagePath.value
+  } else {
+    payload.type = 'text'
+    payload.text = searchText.value.trim()
+  }
+
+  send('search', payload)
 }
 
 const rowCount = computed(() => Math.ceil(results.value.length / COLUMNS.value))
@@ -88,24 +122,40 @@ onMounted(() => {
 
   const cleanups = [
     on('searchResult', (data: unknown) => {
+      const r = data as { results: SearchResult[]; total: number; offset: number; hasMore: boolean }
       searching.value = false
-      const r = data as { results: SearchResult[]; total: number }
-      results.value = r.results || []
-      thumbnailCache.value = {}
-      if (r.total === 0) {
-        message.info('未找到匹配结果')
-      } else {
-        message.success(`找到 ${r.total} 个结果`)
-      }
-      nextTick(() => {
-        if (containerRef.value) {
-          containerRef.value.scrollTop = 0
+      loadingMore.value = false
+
+      if (r.offset === 0) {
+        // 首次搜索：替换结果
+        results.value = r.results || []
+        thumbnailCache.value = {}
+        if (r.total === 0) {
+          message.info('未找到匹配结果')
+          hasMore.value = false
+        } else {
+          message.success(`找到 ${r.total} 个结果`)
+          hasMore.value = r.hasMore
         }
-      })
+        nextTick(() => {
+          if (containerRef.value) {
+            containerRef.value.scrollTop = 0
+          }
+        })
+      } else {
+        // 加载更多：追加结果
+        const newResults = r.results || []
+        results.value.push(...newResults)
+        hasMore.value = r.hasMore
+        if (newResults.length === 0) {
+          message.info('已加载全部结果')
+        }
+      }
     }),
 
     on('searchError', (data: unknown) => {
       searching.value = false
+      loadingMore.value = false
       const err = data as { error?: string }
       message.error(`搜索失败: ${err?.error || '未知错误'}`)
     }),
@@ -149,17 +199,22 @@ function doSearch() {
   }
 
   searching.value = true
+  hasMore.value = true
   results.value = []
 
   if (searchImagePath.value) {
     send('search', {
       type: 'image',
       imagePath: searchImagePath.value,
+      offset: 0,
+      limit: PAGE_SIZE,
     })
   } else {
     send('search', {
       type: 'text',
       text: searchText.value.trim(),
+      offset: 0,
+      limit: PAGE_SIZE,
     })
   }
 }
@@ -208,7 +263,7 @@ function setupThumbObserver() {
   thumbs.forEach((el) => thumbnailObs?.observe(el))
 }
 
-watch(results, () => {
+watch(visibleResults, () => {
   nextTick(() => {
     setupThumbObserver()
   })
@@ -245,6 +300,15 @@ onUnmounted(() => {
             :item-height="ITEM_HEIGHT"
             @preview="openPreview(item)"
           />
+        </div>
+
+        <!-- 加载更多指示器 -->
+        <div v-if="loadingMore" class="load-more-indicator">
+          <n-spin size="small" />
+          <span class="load-more-text">加载更多...</span>
+        </div>
+        <div v-else-if="!hasMore && results.length > PAGE_SIZE" class="load-more-indicator">
+          <span class="load-more-text">已加载全部结果</span>
         </div>
       </div>
 
@@ -296,5 +360,18 @@ onUnmounted(() => {
 
 .search-empty {
   margin-top: 80px;
+}
+
+.load-more-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  color: #999;
+}
+
+.load-more-text {
+  font-size: 13px;
 }
 </style>
