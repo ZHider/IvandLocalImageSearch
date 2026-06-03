@@ -40,8 +40,14 @@ export function useApiTest(config: Ref<AppConfig>) {
     testing.value = true
     testResult.value = null
 
-    const needsApiKey = config.value.apiType === 'openai' || config.value.apiType === 'custom'
-    const provider = config.value.apiType === 'ollama' ? 'ollama' : 'openai'
+    // 映射前端 apiType 到后端 provider
+    const providerMap: Record<string, string> = {
+      vllm: 'vllm',
+      dashscope: 'dashscope',
+      custom: 'vllm',
+    }
+    const provider = providerMap[config.value.apiType] || 'vllm'
+    const needsApiKey = config.value.apiType === 'vllm' || config.value.apiType === 'dashscope' || config.value.apiType === 'custom'
 
     send('testApiConnection', {
       provider,

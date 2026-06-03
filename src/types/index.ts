@@ -1,4 +1,4 @@
-export type ApiType = 'ollama' | 'llamacpp' | 'openai' | 'custom' | ''
+export type ApiType = 'vllm' | 'dashscope' | 'custom' | ''
 
 export interface ImageProcessingConfig {
   thumbnailSize: number

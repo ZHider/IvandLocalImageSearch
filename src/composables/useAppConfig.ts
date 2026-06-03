@@ -71,14 +71,15 @@ export function useAppConfig() {
     }, 300)
   }
 
-  const needsApiKey = computed(() => config.value.apiType === 'openai' || config.value.apiType === 'custom')
+  const needsApiKey = computed(() => config.value.apiType === 'vllm' || config.value.apiType === 'dashscope' || config.value.apiType === 'custom')
   const isCustomApi = computed(() => config.value.apiType === 'custom')
 
   function onApiTypeChange(value: string) {
     config.value.apiType = value as ApiType
-    if (value === 'openai' && !config.value.endpoint) {
-      config.value.endpoint = 'https://api.openai.com'
-      config.value.customEmbeddingPath = '/v1/embeddings'
+    if (value === 'vllm') {
+      config.value.endpoint = 'http://localhost:8000'
+    } else if (value === 'dashscope') {
+      config.value.endpoint = 'https://dashscope.aliyuncs.com'
     } else if (value === 'custom') {
       config.value.customProviderName = ''
       config.value.customEmbeddingPath = '/v1/embeddings'

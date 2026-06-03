@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::config;
 use crate::constants;
-use crate::embedding::{self, create_client};
+use crate::embed::{self, EmbedClient};
 use crate::log_error;
 use crate::log_info;
 use crate::vector_store::{self, VectorStore};
@@ -34,7 +34,7 @@ struct SearchQuery {
 
 /// 阶段 1：生成查询向量
 async fn generate_query_vector(
-    client: &embedding::ApiClient,
+    client: &embed::EmbedClient,
     query: &SearchQuery,
     token: &str,
     write: &mut WsWriter,
@@ -316,7 +316,7 @@ pub async fn handle_search(token: &str, data: Value, write: &mut WsWriter) {
 
 // ---- 辅助函数：创建搜索客户端 ----
 
-async fn create_search_client(token: &str, write: &mut WsWriter) -> Option<embedding::ApiClient> {
+async fn create_search_client(token: &str, write: &mut WsWriter) -> Option<embed::EmbedClient> {
     let app_config = match config::load_config_from_file() {
         Ok(c) => c,
         Err(e) => {
@@ -333,7 +333,7 @@ async fn create_search_client(token: &str, write: &mut WsWriter) -> Option<embed
     };
 
     let api_config = config_to_api_config(&app_config);
-    match create_client(&api_config) {
+    match EmbedClient::new(&api_config) {
         Ok(c) => Some(c),
         Err(e) => {
             log_error(&format!("创建 embedding 客户端失败: {}", e));

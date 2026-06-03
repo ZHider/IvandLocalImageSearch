@@ -1,6 +1,6 @@
 mod config;
 mod constants;
-mod embedding;
+mod embed;
 mod event_dispatcher;
 mod events;
 mod file_utils;

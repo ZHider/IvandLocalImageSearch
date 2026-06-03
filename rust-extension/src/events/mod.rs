@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::config::AppConfig;
-use crate::embedding::ApiConfig;
+use crate::embed::ApiConfig;
 use crate::log_info;
 use crate::ws_client::{self, WsWriter};
 
@@ -41,8 +41,15 @@ pub async fn handle_ping(token: &str, data: Value, write: &mut WsWriter) {
 /// 将 AppConfig 转换为 embedding 模块使用的 ApiConfig
 pub(crate) fn config_to_api_config(config: &AppConfig) -> ApiConfig {
     let base_url = config.endpoint.trim_end_matches('/').to_string();
+
+    // 映射前端 apiType 到后端 provider
+    let provider = match config.api_type.as_str() {
+        "dashscope" => "dashscope".to_string(),
+        _ => "vllm".to_string(), // vllm 是默认 provider（原 openai）
+    };
+
     ApiConfig {
-        provider: "openai".to_string(),
+        provider,
         base_url,
         api_key: config.api_key.clone(),
         model: config.model_name.clone(),

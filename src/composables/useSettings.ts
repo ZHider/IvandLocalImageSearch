@@ -6,7 +6,8 @@ export interface ApiTypeOption {
 }
 
 export const API_TYPE_OPTIONS: ApiTypeOption[] = [
-  { label: 'OpenAI 兼容', value: 'openai' },
+  { label: 'vLLM', value: 'vllm' },
+  { label: 'DashScope', value: 'dashscope' },
   { label: '自定义 API', value: 'custom' },
 ]
 

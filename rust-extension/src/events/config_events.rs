@@ -3,7 +3,7 @@
 use serde_json::Value;
 
 use crate::config::{self, AppConfig};
-use crate::embedding::{self, ApiConfig};
+use crate::embed::{ApiConfig, EmbedClient};
 use crate::log_error;
 use crate::log_info;
 use crate::ws_client::{self, WsWriter};
@@ -38,7 +38,7 @@ pub async fn handle_test_api_connection(token: &str, data: Value, write: &mut Ws
         config.base_url.trim_end_matches('/')
     ));
 
-    let client = match embedding::create_client(&config) {
+    let client = match EmbedClient::new(&config) {
         Ok(c) => c,
         Err(e) => {
             log_error(&format!("创建客户端失败: {}", e));

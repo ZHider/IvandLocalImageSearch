@@ -286,7 +286,7 @@ pnpm neu:dev
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `apiType` | string | AI 提供商: `ollama` / `openai` / `llamacpp` / `custom` |
+| `apiType` | string | AI 提供商: `vllm` / `dashscope` / `custom` |
 | `endpoint` | string | API 端点 URL |
 | `apiKey` | string \| null | API 密钥（可选） |
 | `modelName` | string | 嵌入模型名称 |
@@ -373,7 +373,7 @@ cargo build
 Windows 用户需要配置 protoc 路径：
 
 ```powershell
-# 编辑 build.bat
+# 编辑 rust-extension\build.bat
 set PROTOC_INCLUDE=D:\your\path\to\protoc-include
 set PROTOC=D:\your\path\to\protoc.exe
 ```
@@ -406,24 +406,6 @@ pnpm neu:dev
 ## 📝 开发指南
 
 ### 添加新功能
-
-#### 前端组件
-
-```bash
-# 1. 在 src/components/ 创建新组件
-# 2. 在 src/composables/ 创建业务逻辑
-# 3. 在 src/types/index.ts 添加类型定义
-# 4. 在路由中添加新页面（如需要）
-```
-
-#### 后端事件处理器
-
-```bash
-# 1. 在 rust-extension/src/events/ 创建新事件文件
-# 2. 在 mod.rs 中导出新 handler
-# 3. 在 event_dispatcher.rs 中注册事件
-# 4. 使用 send_broadcast 发送响应
-```
 
 ### 代码规范
 

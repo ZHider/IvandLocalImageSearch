@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 
 use crate::config;
 use crate::constants;
-use crate::embedding::{self, create_client};
+use crate::embed::{self, EmbedClient};
 use crate::file_utils;
 use crate::image_processing;
 use crate::log_error;
@@ -79,7 +79,7 @@ async fn send_progress(
 
 struct IndexingContext {
     img_opts: image_processing::ProcessingOptions,
-    client: embedding::ApiClient,
+    client: embed::EmbedClient,
     store: VectorStore,
     now: String,
     advanced_options: config::AdvancedOptions,
@@ -127,7 +127,7 @@ async fn load_indexing_config(
     ));
     log_info(&format!("使用并发线程数: {}", embed_threads));
 
-    let client = match create_client(&api_config) {
+    let client = match EmbedClient::new(&api_config) {
         Ok(c) => c,
         Err(e) => {
             log_error(&format!("创建 embedding 客户端失败: {}", e));
@@ -371,7 +371,7 @@ struct ProcessResult {
 async fn process_incremental_files(
     token: &str,
     write: &mut WsWriter,
-    client: &embedding::ApiClient,
+    client: &embed::EmbedClient,
     store: &mut VectorStore,
     incremental: &[&scanner::FileEntry],
     mut current_step: u32,
@@ -871,7 +871,7 @@ async fn resolve_embed_path_async(
 }
 
 async fn process_image_file(
-    client: &embedding::ApiClient,
+    client: &embed::EmbedClient,
     file_path: &str,
     file_name: &str,
     file_size: u64,
@@ -936,7 +936,7 @@ async fn process_image_file(
 }
 
 async fn process_text_file(
-    client: &embedding::ApiClient,
+    client: &embed::EmbedClient,
     file_path: &str,
     file_name: &str,
     file_size: u64,

@@ -5,6 +5,8 @@
 
 基于 AI 向量化技术的本地图片搜索引擎，支持语义搜索、EXIF 信息提取、智能缩略图生成等功能。使用 NeutralinoJS + Vue3 + Rust 构建的跨平台桌面应用。
 
+> **开发说明**：本项目开发者主要使用 Windows，以下说明均基于 Windows 系统。其他系统如有需要可提供有限支持。
+
 ## ✨ 核心特性
 
 - 🔍 **语义搜索** - 使用 AI 向量嵌入技术，支持自然语言搜索图片
@@ -28,7 +30,7 @@
 
 1. **配置 AI 服务**
    - 进入"设置"页面
-   - 选择 AI 提供商（Ollama / OpenAI / llama.cpp / 自定义）
+   - 选择 AI 提供商（OpenAI 兼容 / 自定义 API）
    - 填写 API 端点、密钥和模型名称
    - 点击"测试连接"验证配置
 
@@ -61,33 +63,15 @@
 - 纯文本 (.txt)
 - Markdown (.md)
 
+## 🔌 Embedding API 协议
+
+应用使用 **vLLM Chat Embeddings 扩展协议** 调用嵌入 API。详细的请求/返回格式说明请参阅 [Embedding API 协议说明](api-protocol.md)。
+
 ##  故障排除
 
 ### 常见问题
 
-#### 1. Rust 编译失败
-
-```bash
-# 确保 Rust 版本 >= 1.75
-rustc --version
-
-# 清理并重新编译
-cd rust-extension
-cargo clean
-cargo build
-```
-
-#### 2. Protobuf 相关错误
-
-Windows 用户需要配置 protoc 路径：
-
-```powershell
-# 编辑 rust-extension\build.bat
-set PROTOC_INCLUDE=D:\your\path\to\protoc-include
-set PROTOC=D:\your\path\to\protoc.exe
-```
-
-#### 3. NeutralinoJS 无法启动
+#### 1. NeutralinoJS 无法启动
 
 ```bash
 # 确保已安装依赖
@@ -101,7 +85,7 @@ rm -rf .neutralino
 pnpm neu:dev
 ```
 
-#### 4. AI API 连接失败
+#### 2. AI API 连接失败
 
 - 检查网络连接
 - 验证 API 端点和密钥
@@ -110,7 +94,8 @@ pnpm neu:dev
 
 ## 📝 更多信息
 
-详细的架构说明、数据库设计、开发指南和部署说明，请参阅 [开发者说明](DEVELOPER.md)。
+- **[开发者说明](DEVELOPER.md)** — 架构说明、数据库设计、开发指南、构建部署
+- **[vLLM 部署指南](vllm-deployment.md)** — 如何部署 vLLM 以提供嵌入 API 服务
 
 ## 📄 许可证
 
