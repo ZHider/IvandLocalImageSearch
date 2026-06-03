@@ -7,28 +7,19 @@ use crate::constants;
 
 /// 判断文件扩展名是否为图片类型
 pub fn is_image_file(path: &str) -> bool {
-    let ext = Path::new(path)
+    Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase());
-    match ext {
-        Some(ref e) => constants::IMAGE_EXTS.contains(&e.as_str()),
-        None => false,
-    }
+        .is_some_and(|e| constants::IMAGE_EXTS.contains(&e.to_lowercase().as_str()))
 }
 
 /// 判断文件扩展名是否为文本类型
 pub fn is_text_file(path: &str) -> bool {
-    let ext = Path::new(path)
+    Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase());
-    match ext {
-        Some(ref e) => constants::TEXT_EXTS.contains(&e.as_str()),
-        None => false,
-    }
+        .is_some_and(|e| constants::TEXT_EXTS.contains(&e.to_lowercase().as_str()))
 }
-
 /// 判断路径是否为有效的可索引文件（图片或文本）
 pub fn is_valid_file(path: &Path) -> bool {
     if !path.is_file() {

@@ -21,10 +21,6 @@ use crate::{log_error, log_info, log_warn};
 const VECTOR_TABLE: &str = "vectors";
 const DB_DIR: &str = "data/lancedb";
 
-// 写入参数优化：减少小文件生成
-#[allow(dead_code)]
-const MAX_ROWS_PER_FILE: usize = 10000;
-
 // HNSW 索引参数
 const HNSW_M: usize = 30;
 const HNSW_EF_CONSTRUCTION: usize = 300;
@@ -196,7 +192,7 @@ impl VectorStore {
 
     /// Batch upsert entries.  Uses `merge_insert` on the `id` column so
     /// existing rows are replaced.
-    /// 
+    ///
     /// 优化点：
     /// 1. 针对 exFAT 文件系统添加了重试机制
     /// 2. 使用 WriteMode::Create 替代 merge_insert 来减少碎片（首次创建时）
@@ -256,7 +252,10 @@ impl VectorStore {
                             let delay = Duration::from_millis(500 * attempt as u64);
                             log_warn(&format!(
                                 "exFAT 文件系统写入失败（尝试 {}/{}），{} 后重试: {}",
-                                attempt, max_retries, format_duration(&delay), last_error
+                                attempt,
+                                max_retries,
+                                format_duration(&delay),
+                                last_error
                             ));
                             sleep(delay).await;
                         } else {
@@ -275,7 +274,8 @@ impl VectorStore {
 
         Err(anyhow::anyhow!(
             "写入向量存储失败（已重试 {} 次）: {}",
-            max_retries, last_error
+            max_retries,
+            last_error
         ))
     }
 
@@ -288,9 +288,7 @@ impl VectorStore {
         // Escape single quotes in the path for the SQL predicate
         let escaped = file_path.replace('\'', "''");
         let predicate = format!("file_path = '{}'", escaped);
-        tbl.delete(&predicate)
-            .await
-            .context("删除失败")?;
+        tbl.delete(&predicate).await.context("删除失败")?;
         Ok(())
     }
 
@@ -318,9 +316,7 @@ impl VectorStore {
             .collect::<Vec<_>>()
             .join(", ");
         let predicate = format!("file_path IN ({})", values);
-        tbl.delete(&predicate)
-            .await
-            .context("批量删除失败")?;
+        tbl.delete(&predicate).await.context("批量删除失败")?;
         Ok(())
     }
 
@@ -420,67 +416,67 @@ impl VectorStore {
             return Ok(0);
         }
         let tbl = self.open_table().await?;
-        tbl.count_rows(None)
-            .await
-            .context("count_rows 失败")
+        tbl.count_rows(None).await.context("count_rows 失败")
     }
 
     /// Build an IVF-HNSW-SQ index on the vector column for faster search.
     /// HNSW 提供比 IVF-PQ 更高的召回率和更快的查询速度。
     /// SQ (Scalar Quantization) 在保持高精度的同时减少存储空间。
-    /// 
+    ///
     /// 应在批量加载数据后调用此方法。
     pub async fn create_index(&self) -> Result<()> {
         if !self.table_exists {
             return Ok(());
         }
         let tbl = self.open_table().await?;
-        
+
         log_info("开始创建向量索引 (IVF-HNSW-SQ)……");
-        log_info(&format!("  HNSW 参数: M={}, ef_construction={}", 
-            HNSW_M, HNSW_EF_CONSTRUCTION));
-        
+        log_info(&format!(
+            "  HNSW 参数: M={}, ef_construction={}",
+            HNSW_M, HNSW_EF_CONSTRUCTION
+        ));
+
         // 使用 IVF_HNSW_SQ 索引类型
         let index = Index::IvfHnswSq(
             IvfHnswSqIndexBuilder::default()
                 .distance_type(DistanceType::Cosine)
                 .num_edges(HNSW_M as u32)
-                .ef_construction(HNSW_EF_CONSTRUCTION as u32)
+                .ef_construction(HNSW_EF_CONSTRUCTION as u32),
         );
-        
+
         tbl.create_index(&["vector"], index)
             .execute()
             .await
             .context("创建索引失败")?;
-        
+
         log_info("向量索引 (IVF-HNSW-SQ) 创建完成");
         Ok(())
     }
 
     /// 优化表：执行 compaction 和 prune 操作
-    /// 
+    ///
     /// Compaction: 合并小文件为大文件，减少文件数量和元数据开销
     /// Prune: 清理旧版本，释放磁盘空间
-    /// 
+    ///
     /// 应在大量写入或删除操作后调用。
     #[allow(dead_code)]
     pub async fn optimize(&self) -> Result<()> {
         if !self.table_exists {
             return Ok(());
         }
-        
+
         log_info("开始优化 LanceDB 表（compaction + prune）……");
-        
+
         // 先执行 compaction
         if let Err(e) = self.compact_files().await {
             log_warn(&format!("文件压缩失败: {}", e));
         }
-        
+
         // 再执行 prune
         if let Err(e) = self.cleanup_old_versions().await {
             log_warn(&format!("版本清理失败: {}", e));
         }
-        
+
         log_info("优化完成");
         Ok(())
     }
@@ -492,14 +488,14 @@ impl VectorStore {
             return Ok(());
         }
         let tbl = self.open_table().await?;
-        
+
         log_info(&format!(
             "开始清理旧版本（保留最近 {} 小时）……",
             VERSION_RETENTION_HOURS
         ));
-        
+
         let retention_duration = TimeDelta::hours(VERSION_RETENTION_HOURS as i64);
-        
+
         match tbl
             .optimize(OptimizeAction::Prune {
                 older_than: Some(retention_duration),
@@ -525,9 +521,9 @@ impl VectorStore {
             return Ok(());
         }
         let tbl = self.open_table().await?;
-        
+
         log_info("开始压缩文件（合并小文件）……");
-        
+
         match tbl
             .optimize(OptimizeAction::Compact {
                 options: CompactionOptions::default(),
@@ -536,10 +532,7 @@ impl VectorStore {
             .await
         {
             Ok(stats) => {
-                log_info(&format!(
-                    "文件压缩完成 - 统计: {:?}",
-                    stats.compaction
-                ));
+                log_info(&format!("文件压缩完成 - 统计: {:?}", stats.compaction));
                 Ok(())
             }
             Err(e) => {
@@ -549,44 +542,8 @@ impl VectorStore {
             }
         }
     }
-
-    /// 获取表的统计信息
-    #[allow(dead_code)]
-    pub async fn get_stats(&self) -> Result<TableStats> {
-        if !self.table_exists {
-            return Ok(TableStats::default());
-        }
-        let tbl = self.open_table().await?;
-        
-        let row_count = tbl
-            .count_rows(None)
-            .await
-            .context("获取行数失败")?;
-        
-        // 尝试获取版本数
-        let version_count = match tbl.list_versions().await {
-            Ok(versions) => versions.len(),
-            Err(_) => 0,
-        };
-        
-        Ok(TableStats {
-            row_count,
-            version_count,
-            table_exists: true,
-        })
-    }
 }
 
-/// 表统计信息
-#[derive(Debug, Default)]
-#[allow(dead_code)]
-pub struct TableStats {
-    pub row_count: usize,
-    pub version_count: usize,
-    pub table_exists: bool,
-}
-
-/// 格式化 Duration 为可读字符串
 fn format_duration(duration: &Duration) -> String {
     let millis = duration.as_millis();
     if millis >= 1000 {

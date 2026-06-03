@@ -49,7 +49,12 @@ pub async fn handle_get_thumbnail(token: &str, data: Value, write: &mut WsWriter
     }
 
     let image_path = req.image_path.clone();
-    match image_processing::generate_thumbnail_async(req.image_path, constants::DEFAULT_THUMBNAIL_SIZE).await {
+    match image_processing::generate_thumbnail_async(
+        req.image_path,
+        constants::DEFAULT_THUMBNAIL_SIZE,
+    )
+    .await
+    {
         Ok(path) => {
             log_info(&format!("getThumbnail 成功: {}", path));
             let _ = ws_client::send_broadcast(

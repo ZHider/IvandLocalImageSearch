@@ -34,10 +34,6 @@ fn default_embed_threads() -> usize {
     constants::DEFAULT_EMBED_THREADS
 }
 
-fn is_image_file(path: &str) -> bool {
-    file_utils::is_image_file(path)
-}
-
 // ---- 进度广播辅助函数 ----
 
 /// 发送索引进度事件到前端
@@ -83,6 +79,14 @@ struct IndexingContext {
     store: VectorStore,
     now: String,
     advanced_options: config::AdvancedOptions,
+}
+
+/// Embedding 配置（不可变引用，用于减少函数参数数量）
+struct EmbedConfig<'a> {
+    client: &'a embed::EmbedClient,
+    now: &'a str,
+    img_opts: &'a image_processing::ProcessingOptions,
+    advanced_options: &'a config::AdvancedOptions,
 }
 
 async fn load_indexing_config(
@@ -267,8 +271,16 @@ struct DiffResult<'a> {
     modified_files: Vec<&'a scanner::FileEntry>,
     deleted_files: Vec<String>,
     new_count: usize,
+}
+
+/// 索引进度计数器，在多个阶段间传递
+struct IndexCounters {
+    current_step: u32,
+    total_steps: u32,
+    new_count: usize,
     modified_count: usize,
     deleted_count: usize,
+    error_count: u32,
 }
 
 async fn analyze_diff<'a>(
@@ -337,12 +349,12 @@ fn diff_with_metadata<'a>(
     }
 
     let new_count = new_files.len();
-    let modified_count = modified_files.len();
-    let deleted_count = deleted_files.len();
 
     log_info(&format!(
         "对比结果: 新增 {} 个, 修改 {} 个, 删除 {} 个",
-        new_count, modified_count, deleted_count
+        new_count,
+        modified_files.len(),
+        deleted_files.len()
     ));
 
     DiffResult {
@@ -350,8 +362,6 @@ fn diff_with_metadata<'a>(
         modified_files,
         deleted_files,
         new_count,
-        modified_count,
-        deleted_count,
     }
 }
 
@@ -361,7 +371,6 @@ fn diff_with_metadata<'a>(
 struct ProcessResult {
     processed_files: Vec<serde_json::Value>,
     error_count: u32,
-    current_step: u32,
     indexed_any: bool,
 }
 
@@ -371,21 +380,13 @@ struct ProcessResult {
 async fn process_incremental_files(
     token: &str,
     write: &mut WsWriter,
-    client: &embed::EmbedClient,
+    embed: &EmbedConfig<'_>,
     store: &mut VectorStore,
     incremental: &[&scanner::FileEntry],
-    mut current_step: u32,
-    total_steps: u32,
-    new_count: usize,
-    modified_count: usize,
-    deleted_count: usize,
-    now: &str,
-    opts: &image_processing::ProcessingOptions,
+    counters: &mut IndexCounters,
     embed_threads: usize,
-    advanced_options: &config::AdvancedOptions,
 ) -> ProcessResult {
     let mut processed_files: Vec<serde_json::Value> = Vec::new();
-    let mut error_count = 0u32;
     let mut indexed_any = false;
     let chunk_size = constants::DEFAULT_CHUNK_SIZE;
     let chunk_overlap = constants::DEFAULT_CHUNK_OVERLAP;
@@ -396,39 +397,31 @@ async fn process_incremental_files(
 
     // 构建所有文件的并发 futures
     let futures = incremental.iter().map(|entry| {
-        let client = client;
         let entry_path = entry.file_path.clone();
         let file_name = std::path::Path::new(&entry.file_path)
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("")
             .to_string();
-        let is_img = is_image_file(&entry.file_path);
+        let is_img = file_utils::is_image_file(&entry.file_path);
         let file_size = entry.file_size;
         let modified_at = entry.modified_at;
         let file_hash = entry.file_hash.clone();
-        let chunk_size = chunk_size;
-        let chunk_overlap = chunk_overlap;
-        let opts = opts;
-        let advanced_options = advanced_options;
 
         async move {
             if is_img {
                 let result = process_image_file(
-                    client,
-                    &entry_path,
+                    embed.client,
+                    entry,
                     &file_name,
-                    file_size,
-                    modified_at,
-                    file_hash.clone(),
-                    opts,
-                    advanced_options,
+                    embed.img_opts,
+                    embed.advanced_options,
                 )
                 .await;
                 (entry_path, file_size, modified_at, file_hash, result)
             } else {
                 let result = process_text_file(
-                    client,
+                    embed.client,
                     &entry_path,
                     &file_name,
                     file_size,
@@ -446,21 +439,20 @@ async fn process_incremental_files(
     let mut stream = futures_util::stream::iter(futures).buffer_unordered(threads);
 
     while let Some((file_path, file_size, modified_at, file_hash, result)) = stream.next().await {
-        current_step += 1;
-
+        counters.current_step += 1;
 
         send_progress(
             token,
             write,
             "processing",
-            current_step,
-            total_steps,
+            counters.current_step,
+            counters.total_steps,
             Some(serde_json::json!({
                 "currentFile": file_path,
-                "newCount": new_count,
-                "modifiedCount": modified_count,
-                "deletedCount": deleted_count,
-                "errorCount": error_count,
+                "newCount": counters.new_count,
+                "modifiedCount": counters.modified_count,
+                "deletedCount": counters.deleted_count,
+                "errorCount": counters.error_count,
             })),
         )
         .await;
@@ -468,10 +460,7 @@ async fn process_incremental_files(
         match result {
             Ok(entries) => {
                 let dim = entries.first().map(|e| e.vector.len()).unwrap_or(0);
-                log_info(&format!(
-                    "处理文件 {} 向量维数: {}",
-                    file_path, dim
-                ));
+                log_info(&format!("处理文件 {} 向量维数: {}", file_path, dim));
                 let file_entry_count = entries.len();
                 batch_buffer.extend(entries);
                 for _ in 0..file_entry_count {
@@ -485,7 +474,7 @@ async fn process_incremental_files(
                 pending_meta.push((file_path.clone(), file_hash.clone()));
             }
             Err(e) => {
-                error_count += 1;
+                counters.error_count += 1;
                 log_error(&format!("处理文件失败 {}: {}", file_path, e));
             }
         }
@@ -494,10 +483,10 @@ async fn process_incremental_files(
         if batch_buffer.len() >= batch_size {
             let count = batch_buffer.len();
             let meta_snapshot = pending_meta.clone();
-            let meta_now = now.to_string();
+            let meta_now = embed.now.to_string();
 
             if let Err(e) = store.batch_upsert(&batch_buffer).await {
-                error_count += 1;
+                counters.error_count += 1;
                 log_error(&format!("批量写入向量存储失败（{} 条）: {}", count, e));
             } else {
                 indexed_any = true;
@@ -515,10 +504,10 @@ async fn process_incremental_files(
     if !batch_buffer.is_empty() {
         let count = batch_buffer.len();
         let meta_snapshot = pending_meta.clone();
-        let meta_now = now.to_string();
+        let meta_now = embed.now.to_string();
 
         if let Err(e) = store.batch_upsert(&batch_buffer).await {
-            error_count += 1;
+            counters.error_count += 1;
             log_error(&format!("批量写入向量存储失败（{} 条）: {}", count, e));
         } else {
             indexed_any = true;
@@ -533,8 +522,7 @@ async fn process_incremental_files(
 
     ProcessResult {
         processed_files,
-        error_count,
-        current_step,
+        error_count: counters.error_count,
         indexed_any,
     }
 }
@@ -547,15 +535,10 @@ async fn cleanup_deleted_files(
     write: &mut WsWriter,
     store: &mut VectorStore,
     deleted_files: &[String],
-    mut current_step: u32,
-    total_steps: u32,
-    new_count: usize,
-    modified_count: usize,
-    deleted_count: usize,
-    error_count: u32,
-) -> u32 {
+    counters: &mut IndexCounters,
+) {
     for path in deleted_files {
-        current_step += 1;
+        counters.current_step += 1;
 
         if let Err(e) = store.remove_by_file_path(path).await {
             log_error(&format!("删除向量失败 {}: {}", path, e));
@@ -566,19 +549,18 @@ async fn cleanup_deleted_files(
             token,
             write,
             "cleanup",
-            current_step,
-            total_steps,
+            counters.current_step,
+            counters.total_steps,
             Some(serde_json::json!({
                 "deletedFile": path,
-                "newCount": new_count,
-                "modifiedCount": modified_count,
-                "deletedCount": deleted_count,
-                "errorCount": error_count,
+                "newCount": counters.new_count,
+                "modifiedCount": counters.modified_count,
+                "deletedCount": counters.deleted_count,
+                "errorCount": counters.error_count,
             })),
         )
         .await;
     }
-    current_step
 }
 
 // ---- 主 handler：阶段化索引管道 ----
@@ -638,8 +620,8 @@ pub async fn handle_start_index(token: &str, data: Value, write: &mut WsWriter) 
 
     // 准备增量处理（提取计数，避免后续部分移动问题）
     let new_count = diff.new_count;
-    let modified_count = diff.modified_count;
-    let deleted_count = diff.deleted_count;
+    let modified_count = diff.modified_files.len();
+    let deleted_count = diff.deleted_files.len();
 
     let mut incremental: Vec<&scanner::FileEntry> = Vec::new();
     incremental.extend(diff.new_files);
@@ -662,22 +644,31 @@ pub async fn handle_start_index(token: &str, data: Value, write: &mut WsWriter) 
     )
     .await;
 
-    // 阶段 4：处理增量文件
-    let proc_result = process_incremental_files(
-        token,
-        write,
-        &ctx.client,
-        &mut ctx.store,
-        &incremental,
-        0,
-        total_steps as u32,
+    // 创建计数器，在阶段间传递进度和错误统计
+    let mut counters = IndexCounters {
+        current_step: 0,
+        total_steps: total_steps as u32,
         new_count,
         modified_count,
         deleted_count,
-        &ctx.now,
-        &ctx.img_opts,
+        error_count: 0,
+    };
+
+    // 阶段 4：处理增量文件
+    let embed_config = EmbedConfig {
+        client: &ctx.client,
+        now: &ctx.now,
+        img_opts: &ctx.img_opts,
+        advanced_options: &ctx.advanced_options,
+    };
+    let proc_result = process_incremental_files(
+        token,
+        write,
+        &embed_config,
+        &mut ctx.store,
+        &incremental,
+        &mut counters,
         index_data.embed_threads,
-        &ctx.advanced_options,
     )
     .await;
 
@@ -687,12 +678,7 @@ pub async fn handle_start_index(token: &str, data: Value, write: &mut WsWriter) 
         write,
         &mut ctx.store,
         &diff.deleted_files,
-        proc_result.current_step,
-        total_steps as u32,
-        new_count,
-        modified_count,
-        deleted_count,
-        proc_result.error_count,
+        &mut counters,
     )
     .await;
 
@@ -702,9 +688,7 @@ pub async fn handle_start_index(token: &str, data: Value, write: &mut WsWriter) 
         write,
         &mut ctx.store,
         &scan_result,
-        new_count,
-        modified_count,
-        deleted_count,
+        &counters,
         &proc_result,
     )
     .await;
@@ -720,14 +704,12 @@ async fn finalize_indexing(
     write: &mut WsWriter,
     store: &mut VectorStore,
     scan_result: &scanner::ScanResult,
-    new_count: usize,
-    modified_count: usize,
-    deleted_count: usize,
+    counters: &IndexCounters,
     proc_result: &ProcessResult,
 ) {
     // 创建向量索引
     if proc_result.indexed_any {
-        let total = (new_count + modified_count + deleted_count) as u32;
+        let total = (counters.new_count + counters.modified_count + counters.deleted_count) as u32;
         send_progress(
             token,
             write,
@@ -755,9 +737,9 @@ async fn finalize_indexing(
         serde_json::json!({
             "files": proc_result.processed_files,
             "total": scan_result.total,
-            "newCount": new_count,
-            "modifiedCount": modified_count,
-            "deletedCount": deleted_count,
+            "newCount": counters.new_count,
+            "modifiedCount": counters.modified_count,
+            "deletedCount": counters.deleted_count,
             "errorCount": proc_result.error_count,
         }),
         write,
@@ -872,30 +854,27 @@ async fn resolve_embed_path_async(
 
 async fn process_image_file(
     client: &embed::EmbedClient,
-    file_path: &str,
+    entry: &scanner::FileEntry,
     file_name: &str,
-    file_size: u64,
-    modified_at: u64,
-    file_hash: String,
     opts: &image_processing::ProcessingOptions,
     advanced_options: &config::AdvancedOptions,
 ) -> anyhow::Result<Vec<crate::vector_store::VectorEntry>> {
-    log_info(&format!("process_image_file: 开始处理 {}", file_path));
-    let exif = image_processing::extract_exif(file_path).unwrap_or_default();
+    log_info(&format!("process_image_file: 开始处理 {}", entry.file_path));
+    let exif = image_processing::extract_exif(&entry.file_path).unwrap_or_default();
 
     // 使用异步版本，避免阻塞 tokio 工作线程
     let (img, thumbnail_path) = decode_and_generate_thumbnail_async(
-        file_path,
-        &file_hash,
+        &entry.file_path,
+        &entry.file_hash,
         opts.thumbnail_size,
     )
     .await?;
 
     let embed_path = resolve_embed_path_async(
         img,
-        file_path,
-        &file_hash,
-        file_size,
+        &entry.file_path,
+        &entry.file_hash,
+        entry.file_size,
         opts.embed_image_size,
         advanced_options,
     )
@@ -916,11 +895,11 @@ async fn process_image_file(
     ));
 
     let metadata = serde_json::json!({
-        "file_path": file_path,
+        "file_path": entry.file_path,
         "file_name": file_name,
-        "file_size": file_size,
-        "modified_at": modified_at,
-        "file_hash": file_hash,
+        "file_size": entry.file_size,
+        "modified_at": entry.modified_at,
+        "file_hash": entry.file_hash,
         "file_type": "image",
         "thumbnail_path": thumbnail_path,
         "exif": serde_json::to_value(&exif).unwrap_or_default(),
@@ -929,7 +908,7 @@ async fn process_image_file(
     });
 
     Ok(vec![crate::vector_store::VectorEntry {
-        id: file_hash.clone(),
+        id: entry.file_hash.clone(),
         vector,
         metadata,
     }])

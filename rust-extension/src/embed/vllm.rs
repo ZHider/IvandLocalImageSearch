@@ -35,17 +35,11 @@ impl VllmProvider {
 
 // ---- 请求体构建 ----
 
-fn build_messages_with_image(
-    instruction: &str,
-    image_data_url: &str,
-    text: &str,
-) -> Value {
-    let mut user_content: Vec<Value> = vec![
-        serde_json::json!({
-            "type": "image_url",
-            "image_url": { "url": image_data_url }
-        }),
-    ];
+fn build_messages_with_image(instruction: &str, image_data_url: &str, text: &str) -> Value {
+    let mut user_content: Vec<Value> = vec![serde_json::json!({
+        "type": "image_url",
+        "image_url": { "url": image_data_url }
+    })];
     if !text.is_empty() {
         user_content.push(serde_json::json!({ "type": "text", "text": text }));
     }
@@ -65,11 +59,7 @@ fn build_messages_with_text(instruction: &str, text: &str) -> Value {
     ])
 }
 
-fn build_request_body(
-    model: &str,
-    messages: Value,
-    extra_params: &Option<Value>,
-) -> Value {
+fn build_request_body(model: &str, messages: Value, extra_params: &Option<Value>) -> Value {
     let mut body = serde_json::json!({
         "model": model,
         "messages": messages,
@@ -95,7 +85,9 @@ fn extract_embedding_vec(response: &Value) -> Result<Vec<f32>> {
         Value::Object(map) if map.contains_key("data") => {
             let data = map["data"].as_array().context("data 字段不是数组")?;
             let first = data.first().context("data 数组为空")?;
-            let emb = first.get("embedding").context("data[0] 缺少 embedding 字段")?;
+            let emb = first
+                .get("embedding")
+                .context("data[0] 缺少 embedding 字段")?;
             // vLLM Chat Embeddings 返回嵌套数组 [[...]]，OpenAI 返回 [...]
             match emb.as_array() {
                 Some(outer) => {
@@ -113,7 +105,9 @@ fn extract_embedding_vec(response: &Value) -> Result<Vec<f32>> {
         }
         Value::Array(arr) if !arr.is_empty() => {
             if let Some(obj) = arr[0].as_object() {
-                let emb = obj.get("embedding").context("数组元素缺少 embedding 字段")?;
+                let emb = obj
+                    .get("embedding")
+                    .context("数组元素缺少 embedding 字段")?;
                 match emb.as_array() {
                     Some(outer) => {
                         let vec = if let Some(inner) = outer.first().and_then(|v| v.as_array()) {
@@ -164,7 +158,13 @@ impl VllmProvider {
         ));
 
         let url = format!("{}/v1/embeddings", self.base_url);
-        let resp = self.client.post(&url).json(&body).send().await.context("embed_text HTTP 请求失败")?;
+        let resp = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .context("embed_text HTTP 请求失败")?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -187,7 +187,13 @@ impl VllmProvider {
         let body = build_request_body(&self.model, messages, &self.extra_params);
 
         let url = format!("{}/v1/embeddings", self.base_url);
-        let resp = self.client.post(&url).json(&body).send().await.context("embed_image HTTP 请求失败")?;
+        let resp = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .context("embed_image HTTP 请求失败")?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -206,7 +212,12 @@ impl VllmProvider {
         let url = format!("{}/v1/models", self.base_url);
         crate::log_info(&format!("health_check (vLLM): GET {}", url));
 
-        let resp = self.client.get(&url).send().await.context("health_check HTTP 请求失败")?;
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .context("health_check HTTP 请求失败")?;
 
         if !resp.status().is_success() {
             let status = resp.status();

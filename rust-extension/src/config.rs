@@ -95,7 +95,11 @@ pub struct AdvancedOptions {
     #[serde(rename = "nativeExtensions", default = "default_native_extensions")]
     pub native_extensions: Vec<String>,
     /// 注入到 embedding 请求体 parameters 字段的额外 JSON 参数
-    #[serde(rename = "extraEmbeddingParams", default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "extraEmbeddingParams",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub extra_embedding_params: Option<serde_json::Value>,
 }
 
@@ -159,21 +163,16 @@ pub fn save_config_to_file(config: AppConfig) -> Result<String> {
 pub fn load_config_from_file() -> Result<AppConfig> {
     let config_path = get_config_path();
 
-    anyhow::ensure!(
-        config_path.exists(),
-        "配置文件不存在: {:?}",
-        config_path
-    );
+    anyhow::ensure!(config_path.exists(), "配置文件不存在: {:?}", config_path);
 
-    let mut file =
-        std::fs::File::open(&config_path).context(format!("打开配置文件失败: {:?}", config_path))?;
+    let mut file = std::fs::File::open(&config_path)
+        .context(format!("打开配置文件失败: {:?}", config_path))?;
 
     let mut contents = String::new();
     file.read_to_string(&mut contents)
         .context("读取配置文件失败")?;
 
-    let config: AppConfig =
-        serde_json::from_str(&contents).context("解析配置文件失败")?;
+    let config: AppConfig = serde_json::from_str(&contents).context("解析配置文件失败")?;
 
     Ok(config)
 }

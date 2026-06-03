@@ -20,7 +20,8 @@ pub const HEIC_TO_WEBP_QUALITY: f32 = 90.0;
 /// WebP 压缩阈值 (MB)
 pub const DEFAULT_WEBP_THRESHOLD_MB: f64 = 4.0;
 /// 模型原生支持的后缀名（不需要转为 WebP 即可发送的格式）
-pub const DEFAULT_NATIVE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "bmp", "tiff", "ico"];
+pub const DEFAULT_NATIVE_EXTENSIONS: &[&str] =
+    &["jpg", "jpeg", "png", "webp", "bmp", "tiff", "ico"];
 pub const DEFAULT_TOP_K: usize = 50;
 
 // ---- 缓冲区 ----

@@ -16,7 +16,7 @@ use crate::ws_client::{self, WsWriter};
 
 // ---- 公共类型 ----
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct ProcessInput {
     #[serde(rename = "nlPort")]
     pub nl_port: String,
@@ -61,7 +61,9 @@ pub(crate) fn config_to_api_config(config: &AppConfig) -> ApiConfig {
 
 pub use config_events::{handle_load_config, handle_save_config, handle_test_api_connection};
 pub use index_events::handle_start_index;
-pub use manage_events::{handle_clear_index, handle_delete_index_entries, handle_optimize_index, handle_query_index};
+pub use manage_events::{
+    handle_clear_index, handle_delete_index_entries, handle_optimize_index, handle_query_index,
+};
 pub use media_events::{
     handle_clear_all_thumbnails, handle_clear_expired_thumbnails, handle_get_preview,
     handle_get_thumbnail,

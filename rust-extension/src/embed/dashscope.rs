@@ -9,7 +9,8 @@ use serde_json::Value;
 use super::common::{self, build_http_client, json_to_f32_vec};
 
 /// DashScope 多模态 Embedding API 路径（拼接在 base_url 之后）。
-const EMBEDDING_PATH: &str = "/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding";
+const EMBEDDING_PATH: &str =
+    "/api/v1/services/embeddings/multimodal-embedding/multimodal-embedding";
 
 /// DashScope 健康检查路径（使用兼容模式 /v1/models）。
 const MODELS_PATH: &str = "/compatible-mode/v1/models";

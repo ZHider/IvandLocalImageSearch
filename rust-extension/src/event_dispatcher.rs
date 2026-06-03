@@ -10,7 +10,7 @@ use crate::ws_client::WsWriter;
 use crate::{log_error, log_info};
 
 /// 从前端接收的消息结构
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct IncomingMessage {
     #[serde(default)]
     pub event: Option<String>,

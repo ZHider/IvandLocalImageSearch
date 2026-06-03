@@ -282,10 +282,11 @@ pub async fn handle_search(token: &str, data: Value, write: &mut WsWriter) {
     let limit = query.limit.unwrap_or(constants::DEFAULT_TOP_K);
 
     // 阶段 2：执行向量搜索
-    let raw_results = match perform_search(&store, &query_vector, query.offset, limit, token, write).await {
-        Some(r) => r,
-        None => return,
-    };
+    let raw_results =
+        match perform_search(&store, &query_vector, query.offset, limit, token, write).await {
+            Some(r) => r,
+            None => return,
+        };
 
     log_info(&format!("搜索返回 {} 个原始结果", raw_results.len()));
 
@@ -311,7 +312,12 @@ pub async fn handle_search(token: &str, data: Value, write: &mut WsWriter) {
     )
     .await;
 
-    log_info(&format!("搜索完成，返回 {} 个去重结果（offset={}, hasMore={}）", results.len(), query.offset, has_more));
+    log_info(&format!(
+        "搜索完成，返回 {} 个去重结果（offset={}, hasMore={}）",
+        results.len(),
+        query.offset,
+        has_more
+    ));
 }
 
 // ---- 辅助函数：创建搜索客户端 ----

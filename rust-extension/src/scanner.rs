@@ -20,6 +20,7 @@ use crate::file_utils;
 fn is_valid_file(path: &Path) -> bool {
     file_utils::is_valid_file(path)
 }
+#[derive(Debug)]
 pub struct ScanResult {
     pub files: Vec<FileEntry>,
     pub total: usize,

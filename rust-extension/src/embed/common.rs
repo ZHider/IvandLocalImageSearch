@@ -6,17 +6,28 @@ use base64::Engine;
 use std::path::Path;
 use std::time::Duration;
 
-/// 通过文件扩展名推断 MIME 类型。
-pub fn mime_from_ext(path: &str) -> String {
+use std::borrow::Cow;
+
+/// 通过文件扩展名推断标准图片 MIME 类型。
+pub fn mime_from_ext(path: &str) -> Cow<'static, str> {
     let ext = Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("jpeg")
         .to_lowercase();
-    if ext == "tif" {
-        return "image/tiff".to_string();
+    match ext.as_str() {
+        "jpg" | "jpeg" => Cow::Borrowed("image/jpeg"),
+        "png" => Cow::Borrowed("image/png"),
+        "webp" => Cow::Borrowed("image/webp"),
+        "bmp" | "dib" => Cow::Borrowed("image/bmp"),
+        "tif" | "tiff" => Cow::Borrowed("image/tiff"),
+        "ico" => Cow::Borrowed("image/x-icon"),
+        "icns" => Cow::Borrowed("image/icns"),
+        "sgi" => Cow::Borrowed("image/sgi"),
+        "gif" => Cow::Borrowed("image/gif"),
+        "heic" | "heif" => Cow::Borrowed("image/heic"),
+        other => Cow::Owned(format!("image/{}", other)),
     }
-    format!("image/{}", ext)
 }
 
 /// 读取图片文件并编码为 base64 data URL。

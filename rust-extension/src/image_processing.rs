@@ -181,8 +181,7 @@ pub(crate) fn generate_thumbnail_from_img(
     let (tw, th) = rgba.dimensions();
     let encoder = webp::Encoder::from_rgba(&rgba, tw, th);
     let encoded = encoder.encode(constants::DEFAULT_WEBP_QUALITY);
-    std::fs::write(&thumb_path, encoded.as_ref())
-        .context("写入缩略图文件失败")?;
+    std::fs::write(&thumb_path, encoded.as_ref()).context("写入缩略图文件失败")?;
     log_info(&format!(
         "生成缩略图: {}x{} -> {}x{}",
         img.width(),
@@ -211,8 +210,7 @@ pub(crate) fn convert_img_to_webp(
     let (w, h) = rgba.dimensions();
     let encoder = webp::Encoder::from_rgba(&rgba, w, h);
     let encoded = encoder.encode(quality);
-    std::fs::write(&webp_path, encoded.as_ref())
-        .context("写入 WebP 缓存失败")?;
+    std::fs::write(&webp_path, encoded.as_ref()).context("写入 WebP 缓存失败")?;
     log_info(&format!(
         "convert_img_to_webp: {}x{} -> {}x{} (q{})",
         img.width(),
@@ -228,8 +226,7 @@ pub(crate) fn convert_img_to_webp(
 
 pub fn generate_thumbnail(path: &str, size: u32) -> Result<String> {
     file_utils::ensure_thumbnails_dir()?;
-    let file_hash = hasher::compute_blake3_hex(Path::new(path))
-        .context("计算文件哈希失败")?;
+    let file_hash = hasher::compute_blake3_hex(Path::new(path)).context("计算文件哈希失败")?;
     let thumb_path = file_utils::get_thumbnails_dir().join(format!("{}.webp", file_hash));
     if thumb_path.exists() {
         return Ok(thumb_path.to_string_lossy().to_string());

@@ -2,6 +2,7 @@ use crate::file_utils;
 use rusqlite::{params, Connection, Result};
 use std::path::PathBuf;
 
+#[derive(Debug, Clone)]
 pub struct IndexMeta {
     pub file_path: String,
     pub file_hash: String,
