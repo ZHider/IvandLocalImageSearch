@@ -95,7 +95,7 @@ pnpm neu:dev
 ## 📝 更多信息
 
 - **[开发者说明](DEVELOPER.md)** — 架构说明、数据库设计、开发指南、构建部署
-- **[vLLM 部署指南](vllm-deployment.md)** — 如何部署 vLLM 以提供嵌入 API 服务
+- **[vLLM 部署指南](llm-deployment.md)** — 如何部署 vLLM 以提供嵌入 API 服务
 
 ## 📄 许可证
 
