@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.26"
+tokio-util = { version = "0.7", features = ["rt"] }
 futures-util = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -22,12 +23,19 @@ chrono = "0.4"
 image = { version = "0.25", features = ["webp"] }
 nom-exif = "3"
 heic = "0.1.6"
+parking_lot = "0.12"
 webp = "0.3.1"
 anyhow = "1"
+
+[profile.dev]
+debug = "line-tables-only"
+incremental = true
+
+[profile.dev.package."*"]
+debug = false
 
 [profile.release]
 strip = true
 panic = 'abort'
-# codegen-units = 1
 opt-level = "s"
 lto = true

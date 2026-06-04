@@ -1,10 +1,13 @@
 //! 事件分发器：负责 WebSocket 消息接收和事件路由。
 
-use futures_util::StreamExt;
+use futures_util::{SinkExt, StreamExt};
+use parking_lot::Mutex;
 use serde::Deserialize;
 use serde_json::Value;
+use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::MaybeTlsStream;
+use tokio_util::sync::CancellationToken;
 
 use crate::ws_client::WsWriter;
 use crate::{log_error, log_info};
@@ -18,6 +21,9 @@ pub struct IncomingMessage {
     pub data: Option<Value>,
 }
 
+/// 全局索引取消令牌：startIndex 创建，cancelIndex 触发
+static INDEX_CANCEL: Mutex<Option<CancellationToken>> = Mutex::new(None);
+
 /// 事件分发器：处理 WebSocket 消息循环
 pub struct EventDispatcher;
 
@@ -28,35 +34,50 @@ impl EventDispatcher {
         mut read: futures_util::stream::SplitStream<
             tokio_tungstenite::WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>,
         >,
-        write: &mut WsWriter,
+        mut write: WsWriter,
     ) {
         log_info("进入事件循环，等待前端消息...");
 
-        while let Some(msg) = read.next().await {
-            match msg {
-                Ok(Message::Text(text)) => {
-                    let text_str = text.to_string();
-                    Self::handle_text_message(token, &text_str, write).await;
+        // 用于索引后台任务向事件循环写 WS 消息的通道
+        let (spawn_tx, mut spawn_rx) = mpsc::unbounded_channel::<String>();
+
+        loop {
+            tokio::select! {
+                // 分支 1：前端 WS 消息
+                msg = read.next() => {
+                    match msg {
+                        Some(Ok(Message::Text(text))) => {
+                            let text_str = text.to_string();
+                            Self::handle_text_message(
+                                token, &text_str, &mut write, &spawn_tx,
+                            ).await;
+                        }
+                        Some(Ok(Message::Close(frame))) => {
+                            log_info(&format!("WebSocket 连接关闭: {:?}", frame));
+                            break;
+                        }
+                        Some(Ok(Message::Ping(data))) => {
+                            log_info(&format!("收到 WebSocket Ping: {} 字节", data.len()));
+                        }
+                        Some(Ok(Message::Pong(data))) => {
+                            log_info(&format!("收到 WebSocket Pong: {} 字节", data.len()));
+                        }
+                        Some(Ok(Message::Binary(data))) => {
+                            log_info(&format!("收到 WebSocket 二进制消息: {} 字节", data.len()));
+                        }
+                        Some(Ok(Message::Frame(_))) => {
+                            log_info("收到 WebSocket 原始帧");
+                        }
+                        Some(Err(e)) => {
+                            log_error(&format!("WebSocket 错误: {}", e));
+                            break;
+                        }
+                        None => break,
+                    }
                 }
-                Ok(Message::Close(frame)) => {
-                    log_info(&format!("WebSocket 连接关闭: {:?}", frame));
-                    break;
-                }
-                Ok(Message::Ping(data)) => {
-                    log_info(&format!("收到 WebSocket Ping: {} 字节", data.len()));
-                }
-                Ok(Message::Pong(data)) => {
-                    log_info(&format!("收到 WebSocket Pong: {} 字节", data.len()));
-                }
-                Ok(Message::Binary(data)) => {
-                    log_info(&format!("收到 WebSocket 二进制消息: {} 字节", data.len()));
-                }
-                Ok(Message::Frame(_)) => {
-                    log_info("收到 WebSocket 原始帧");
-                }
-                Err(e) => {
-                    log_error(&format!("WebSocket 错误: {}", e));
-                    break;
+                // 分支 2：索引后台任务写入 WS
+                Some(ws_text) = spawn_rx.recv() => {
+                    let _ = write.send(Message::Text(ws_text.into())).await;
                 }
             }
         }
@@ -65,19 +86,16 @@ impl EventDispatcher {
     }
 
     /// 处理文本消息：解析 JSON 并分发到具体事件处理器
-    async fn handle_text_message(token: &str, text_str: &str, write: &mut WsWriter) {
+    async fn handle_text_message(
+        token: &str,
+        text_str: &str,
+        write: &mut WsWriter,
+        spawn_tx: &mpsc::UnboundedSender<String>,
+    ) {
         match serde_json::from_str::<IncomingMessage>(text_str) {
             Ok(incoming) => {
-                let is_window_event = matches!(
-                    incoming.event.as_deref(),
-                    Some("windowBlur") | Some("windowFocus")
-                );
-                if !is_window_event {
-                    log_info(&format!("收到事件: {:?}", incoming.event));
-                }
-
                 if let Some(event) = incoming.event {
-                    Self::dispatch_event(token, &event, incoming.data, write).await;
+                    Self::dispatch_event(token, &event, incoming.data, write, spawn_tx).await;
                 }
             }
             Err(e) => {
@@ -87,7 +105,13 @@ impl EventDispatcher {
     }
 
     /// 分发事件到对应的处理器
-    async fn dispatch_event(token: &str, event: &str, data: Option<Value>, write: &mut WsWriter) {
+    async fn dispatch_event(
+        token: &str,
+        event: &str,
+        data: Option<Value>,
+        write: &mut WsWriter,
+        spawn_tx: &mpsc::UnboundedSender<String>,
+    ) {
         let data = data.unwrap_or(serde_json::json!({}));
 
         match event {
@@ -104,7 +128,36 @@ impl EventDispatcher {
                 crate::events::handle_load_config(token, write).await;
             }
             "startIndex" => {
-                crate::events::handle_start_index(token, data, write).await;
+                // 防止并发索引：如果已有索引在运行，拒绝新请求
+                let mut guard = INDEX_CANCEL.lock();
+                if guard.is_some() {
+                    log_info("索引任务已在运行，忽略重复的 startIndex 请求");
+                    return;
+                }
+                let cancel = CancellationToken::new();
+                let cancel_clone = cancel.clone();
+                *guard = Some(cancel);
+                drop(guard);
+
+                let token_owned = token.to_string();
+                let tx = spawn_tx.clone();
+                tokio::spawn(async move {
+                    crate::events::handle_start_index(
+                        &token_owned, data, tx, &cancel_clone,
+                    )
+                    .await;
+                    let mut guard = INDEX_CANCEL.lock();
+                    *guard = None;
+                });
+            }
+            "cancelIndex" => {
+                log_info("收到 cancelIndex 事件，正在查找活跃令牌...");
+                if let Some(cancel) = INDEX_CANCEL.lock().as_ref() {
+                    cancel.cancel();
+                    log_info("索引任务取消令牌已触发 ✓");
+                } else {
+                    log_info("cancelIndex: 没有活跃的索引任务");
+                }
             }
             "search" => {
                 crate::events::handle_search(token, data, write).await;
@@ -136,6 +189,7 @@ impl EventDispatcher {
             // NeutralinoJS 框架内部事件，无需处理
             "windowBlur"
             | "windowFocus"
+            | "windowRestore"
             | "clientConnect"
             | "clientDisconnect"
             | "appClientConnect"
@@ -149,3 +203,4 @@ impl EventDispatcher {
         }
     }
 }
+

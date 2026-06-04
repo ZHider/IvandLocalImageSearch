@@ -91,7 +91,6 @@ const emit = defineEmits<{
 }
 
 .preview-loading {
-  object-fit: fill;
   opacity: 0.6;
   filter: blur(2px);
 }

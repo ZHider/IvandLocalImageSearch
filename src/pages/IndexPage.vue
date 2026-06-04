@@ -11,7 +11,7 @@ import IndexManagePanel from '../components/IndexManagePanel.vue'
 
 const message = useMessage()
 const { config, saveConfig: doSave } = useAppConfig()
-const { progress, result, start: startIndex } = useIndex()
+const { progress, result, start: startIndex, stop: stopIndex, stopping } = useIndex()
 
 // 使用全局索引状态（来自 App.vue），确保导航栏访问时状态同步
 const indexing = inject<Ref<boolean>>('indexing', ref(false))
@@ -86,12 +86,14 @@ function handleStartIndex() {
       v-if="activeTab === 'build'"
       :folders="config.folders"
       :indexing="indexing"
+      :stopping="stopping"
       :add-folder-disabled="addFolderDisabled"
       :progress="progress"
       :result="result"
       @addFolder="addFolder"
       @removeFolder="removeFolder"
       @startIndex="handleStartIndex"
+      @stopIndex="stopIndex"
     />
     <IndexManagePanel v-else />
   </SiderLayout>

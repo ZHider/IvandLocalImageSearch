@@ -63,6 +63,9 @@ onMounted(() => {
     on('indexError', () => {
       indexing.value = false
     }),
+    on('indexCancelled', () => {
+      indexing.value = false
+    }),
   )
 })
 
@@ -82,6 +85,7 @@ onUnmounted(() => {
             :options="menuOptions"
             mode="horizontal"
             class="nav-menu"
+            :class="{ 'nav-menu--gray': indexing }"
             :disabled="indexing"
             @update:value="handleMenuUpdate"
           />
@@ -128,20 +132,16 @@ onUnmounted(() => {
   font-weight: 600;
   white-space: nowrap;
 }
+
 .nav-menu {
   flex-shrink: 0;
-  transition: opacity 0.2s;
+  transition: opacity 0.25s;
 }
 
-.nav-menu:deep(.n-menu--disabled) {
-  opacity: 0.45;
-  cursor: not-allowed;
+.nav-menu--gray {
+  opacity: 0.4;
+  pointer-events: none;
 }
-
-.nav-menu:deep(.n-menu--disabled .n-menu-item-content) {
-  cursor: not-allowed !important;
-}
-
 
 .indexing-tag {
   flex-shrink: 0;

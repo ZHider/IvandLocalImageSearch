@@ -43,7 +43,7 @@ function init() {
   on('configSaved', () => {
     savingMsg?.destroy()
     saving.value = false
-    message.success('配置保存成功 ✅')
+    message.success('配置保存成功')
   })
 
   on('configSaveError', (data: unknown) => {

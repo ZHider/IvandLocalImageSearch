@@ -21,6 +21,7 @@ function formatSimilarity(sim: number): string {
 <template>
   <div class="result-card" :style="{ height: itemHeight + 'px' }">
     <div class="card-thumb" @click="emit('preview')">
+      <div v-if="thumbnailSrc" class="thumb-bg" :style="{ backgroundImage: `url(${thumbnailSrc})` }"></div>
       <img
         v-if="thumbnailSrc"
         :src="thumbnailSrc"
@@ -85,9 +86,20 @@ function formatSimilarity(sim: number): string {
 }
 
 .thumb-img {
+  position: relative;
+  z-index: 1;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
+}
+
+.thumb-bg {
+  position: absolute;
+  inset: -10px;
+  background-size: cover;
+  background-position: center;
+  filter: blur(20px) brightness(0.5);
+  z-index: 0;
 }
 
 .thumb-placeholder {
@@ -108,6 +120,7 @@ function formatSimilarity(sim: number): string {
   position: absolute;
   top: 8px;
   right: 8px;
+  z-index: 2;
   color: #fff;
   font-size: 12px;
   font-weight: 600;

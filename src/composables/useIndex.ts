@@ -8,6 +8,7 @@ export function useIndex() {
   const { send, on } = useExtension()
 
   const indexing = ref(false)
+  const stopping = ref(false)
   const progress = ref<IndexProgress | null>(null)
   const result = ref<IndexResult | null>(null)
 
@@ -39,6 +40,13 @@ export function useIndex() {
         const err = data as { error?: string }
         message.error(`索引失败: ${err?.error || '未知错误'}`)
       }),
+
+      on('indexCancelled', () => {
+        indexing.value = false
+        stopping.value = false
+        progress.value = null
+        message.info('索引已停止')
+      }),
     )
   })
 
@@ -60,10 +68,18 @@ export function useIndex() {
     send('startIndex', { folders, embedThreads })
   }
 
+  function stop() {
+    console.log('[useIndex] 发送 cancelIndex 事件')
+    stopping.value = true
+    send('cancelIndex', {})
+  }
+
   return {
     indexing,
+    stopping,
     progress,
     result,
     start,
+    stop,
   }
 }

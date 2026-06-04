@@ -77,7 +77,7 @@ async fn main() {
     .await;
     log_info("extensionReady 事件发送成功");
 
-    EventDispatcher::run(&conn.token, conn.read, &mut conn.write).await;
+    EventDispatcher::run(&conn.token, conn.read, conn.write).await;
 }
 
 /// 从 stdin 读取并解析输入数据

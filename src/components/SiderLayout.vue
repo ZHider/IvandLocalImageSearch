@@ -28,6 +28,7 @@ const emit = defineEmits<{
           :options="menuOptions"
           :collapsed="false"
           :disabled="menuDisabled"
+          :class="{ 'side-menu--gray': menuDisabled }"
         />
       </n-layout-sider>
       <n-layout-content class="sider-content" :native-scrollbar="false">
@@ -85,12 +86,9 @@ const emit = defineEmits<{
 }
 
 /* 索引进行时，子侧边栏菜单灰色禁用 */
-.sider-container:deep(.n-menu--disabled) {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.sider-container:deep(.n-menu--disabled .n-menu-item-content) {
-  cursor: not-allowed !important;
+.side-menu--gray {
+  opacity: 0.4;
+  pointer-events: none;
+  transition: opacity 0.25s;
 }
 </style>

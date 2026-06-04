@@ -7,6 +7,7 @@ import type { IndexProgress, IndexResult } from '../types'
 defineProps<{
   folders: string[]
   indexing: boolean
+  stopping: boolean
   addFolderDisabled: boolean
   progress: IndexProgress | null
   result: IndexResult | null
@@ -16,6 +17,7 @@ const emit = defineEmits<{
   addFolder: []
   removeFolder: [index: number]
   startIndex: []
+  stopIndex: []
 }>()
 </script>
 
@@ -30,14 +32,34 @@ const emit = defineEmits<{
     />
 
     <n-button
+      v-if="!indexing"
       type="primary"
       size="large"
       @click="emit('startIndex')"
-      :loading="indexing"
       :disabled="folders.length === 0"
       block
     >
-      {{ indexing ? '索引进行中...' : '🚀 开始索引' }}
+      🚀 开始索引
+    </n-button>
+
+    <n-button
+      v-else-if="stopping"
+      type="warning"
+      size="large"
+      :loading="true"
+      block
+    >
+      正在停止...
+    </n-button>
+
+    <n-button
+      v-else
+      type="warning"
+      size="large"
+      @click="emit('stopIndex')"
+      block
+    >
+      ⏹ 停止索引
     </n-button>
 
     <IndexProgressPanel :progress="progress" />
