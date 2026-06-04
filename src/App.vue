@@ -128,10 +128,20 @@ onUnmounted(() => {
   font-weight: 600;
   white-space: nowrap;
 }
-
 .nav-menu {
   flex-shrink: 0;
+  transition: opacity 0.2s;
 }
+
+.nav-menu:deep(.n-menu--disabled) {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.nav-menu:deep(.n-menu--disabled .n-menu-item-content) {
+  cursor: not-allowed !important;
+}
+
 
 .indexing-tag {
   flex-shrink: 0;

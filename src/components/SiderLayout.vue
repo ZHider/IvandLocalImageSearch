@@ -47,6 +47,7 @@ const emit = defineEmits<{
   </div>
 </template>
 
+
 <style scoped>
 .slide-enter-active,
 .slide-leave-active {
@@ -81,5 +82,15 @@ const emit = defineEmits<{
   flex: 1;
   padding: 20px 24px;
   overflow-y: auto;
+}
+
+/* 索引进行时，子侧边栏菜单灰色禁用 */
+.sider-container:deep(.n-menu--disabled) {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.sider-container:deep(.n-menu--disabled .n-menu-item-content) {
+  cursor: not-allowed !important;
 }
 </style>
