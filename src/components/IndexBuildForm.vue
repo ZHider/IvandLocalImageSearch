@@ -31,38 +31,66 @@ const emit = defineEmits<{
       @removeFolder="emit('removeFolder', $event)"
     />
 
-    <n-button
-      v-if="!indexing"
-      type="primary"
-      size="large"
-      @click="emit('startIndex')"
-      :disabled="folders.length === 0"
-      block
-    >
-      🚀 开始索引
-    </n-button>
+    <div class="btn-wrapper">
+      <!-- 停止按钮（底层） -->
+      <n-button
+        v-if="stopping"
+        type="warning"
+        size="large"
+        :loading="true"
+        block
+        class="btn-stop"
+      >
+        正在停止...
+      </n-button>
+      <n-button
+        v-else
+        type="warning"
+        size="large"
+        @click="emit('stopIndex')"
+        block
+        class="btn-stop"
+      >
+        ⏹ 停止索引
+      </n-button>
 
-    <n-button
-      v-else-if="stopping"
-      type="warning"
-      size="large"
-      :loading="true"
-      block
-    >
-      正在停止...
-    </n-button>
-
-    <n-button
-      v-else
-      type="warning"
-      size="large"
-      @click="emit('stopIndex')"
-      block
-    >
-      ⏹ 停止索引
-    </n-button>
+      <!-- 开始按钮（顶层，opacity 过渡） -->
+      <n-button
+        type="primary"
+        size="large"
+        @click="emit('startIndex')"
+        :disabled="folders.length === 0"
+        block
+        class="btn-start"
+        :class="{ 'btn-start--hidden': indexing }"
+        :style="{ opacity: indexing ? 0 : 1 }"
+      >
+        🚀 开始索引
+      </n-button>
+    </div>
 
     <IndexProgressPanel :progress="progress" />
     <IndexResultPanel :result="result" />
   </n-space>
 </template>
+
+<style scoped>
+.btn-wrapper {
+  display: grid;
+}
+
+.btn-start,
+.btn-stop {
+  grid-area: 1 / 1;
+  width: 100%;
+}
+
+.btn-start {
+  z-index: 2;
+  transition: opacity 0.15s ease;
+}
+
+.btn-start--hidden {
+  pointer-events: none;
+}
+</style>

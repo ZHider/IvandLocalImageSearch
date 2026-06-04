@@ -59,9 +59,9 @@ HEIC/HEIF 格式的图片会自动转为 WebP 再发送。详细格式说明见 
 > 适合 Windows 上拥有 NVIDIA 显卡的用户，直接在 Windows 系统中运行 vLLM，无需虚拟机或 Docker。
 > 使用预编译 wheel，**无需从源码编译**。
 
-项目地址：
-- [SystemPanic/vllm-windows](https://github.com/SystemPanic/vllm-windows)（上游，提供 pre-built wheel）
-- [ZHider/vllm-CUDA13-win_amd64-whls](https://gitee.com/zhider/vllm-cuda13-win_amd64-whls)（国内镜像，含完整依赖清单）
+相关仓库：
+- [ZHider/vLLM-Windows-Installing-Script](https://github.com/ZHider/vLLM-Windows-Installing-Script) — Windows 一键安装脚本，自动完成环境配置与依赖安装（**推荐 Windows 用户优先尝试**）
+- [SystemPanic/vllm-windows](https://github.com/SystemPanic/vllm-windows) — 上游项目，提供 pre-built wheel
 
 ### 1. 环境要求
 

@@ -142,10 +142,7 @@ impl EventDispatcher {
                 let token_owned = token.to_string();
                 let tx = spawn_tx.clone();
                 tokio::spawn(async move {
-                    crate::events::handle_start_index(
-                        &token_owned, data, tx, &cancel_clone,
-                    )
-                    .await;
+                    crate::events::handle_start_index(&token_owned, data, tx, &cancel_clone).await;
                     let mut guard = INDEX_CANCEL.lock();
                     *guard = None;
                 });
@@ -203,4 +200,3 @@ impl EventDispatcher {
         }
     }
 }
-

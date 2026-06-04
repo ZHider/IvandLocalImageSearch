@@ -17,43 +17,60 @@ const phaseLabels: Record<string, string> = {
 </script>
 
 <template>
-  <n-card v-if="progress" size="small" title="索引进度">
-    <n-space vertical :size="12">
-      <n-tag type="info">
-        {{ phaseLabels[progress.phase] || progress.phase }}
-      </n-tag>
-      <n-progress
-        type="line"
-        :percentage="progress.percentage"
-        :indicator-placement="'inside'"
-        :height="24"
-        :border-radius="4"
-        :fill-border-radius="0"
-      />
-      <n-text depth="3">
-        <template v-if="progress.phase === 'scanning'">
-          已扫描: {{ progress.current }}
-        </template>
-        <template v-else>
-          进度: {{ progress.current }} / {{ progress.total }}
-        </template>
-      </n-text>
-      <n-text v-if="progress.currentFile" depth="3" class="current-file">
-        📄 {{ progress.currentFile }}
-      </n-text>
-      <n-text v-if="progress.deletedFile" depth="3" class="current-file">
-        🗑️ {{ progress.deletedFile }}
-      </n-text>
-      <n-text v-if="progress.errorCount" depth="3" type="warning">
-        ⚠️ 失败: {{ progress.errorCount }} 个
-      </n-text>
-    </n-space>
-  </n-card>
+  <Transition name="fade-slide">
+    <n-card v-if="progress" size="small" title="索引进度">
+      <n-space vertical :size="12">
+        <n-tag type="info">
+          {{ phaseLabels[progress.phase] || progress.phase }}
+        </n-tag>
+        <n-progress
+          type="line"
+          :percentage="progress.percentage"
+          :indicator-placement="'inside'"
+          :height="24"
+          :border-radius="4"
+          :fill-border-radius="0"
+        />
+        <n-text depth="3">
+          <template v-if="progress.phase === 'scanning'">
+            已扫描: {{ progress.current }}
+          </template>
+          <template v-else>
+            进度: {{ progress.current }} / {{ progress.total }}
+          </template>
+        </n-text>
+        <n-text v-if="progress.currentFile" depth="3" class="current-file">
+          📄 {{ progress.currentFile }}
+        </n-text>
+        <n-text v-if="progress.deletedFile" depth="3" class="current-file">
+          🗑️ {{ progress.deletedFile }}
+        </n-text>
+        <n-text v-if="progress.errorCount" depth="3" type="warning">
+          ⚠️ 失败: {{ progress.errorCount }} 个
+        </n-text>
+      </n-space>
+    </n-card>
+  </Transition>
 </template>
 
 <style scoped>
 .current-file {
   word-break: break-all;
   max-width: 100%;
+}
+
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: all 0.25s ease;
+}
+
+.fade-slide-enter-from {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
 }
 </style>

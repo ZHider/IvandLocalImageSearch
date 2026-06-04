@@ -35,7 +35,6 @@ fn default_embed_threads() -> usize {
     constants::DEFAULT_EMBED_THREADS
 }
 
-
 // ---- 取消检查辅助函数 ----
 
 /// 检查取消令牌：若已取消则发送 indexCancelled 事件，返回 true
@@ -47,7 +46,6 @@ fn check_cancelled(cancel: &CancellationToken, tx: &UnboundedSender<String>, tok
     }
     false
 }
-
 
 // ---- 通道发送辅助函数 ----
 
@@ -473,14 +471,9 @@ async fn process_incremental_files(
 
         async move {
             if is_img {
-                let result = process_image_file(
-                    &client,
-                    &entry,
-                    &file_name,
-                    &img_opts,
-                    &advanced_options,
-                )
-                .await;
+                let result =
+                    process_image_file(&client, &entry, &file_name, &img_opts, &advanced_options)
+                        .await;
                 (entry_path, file_size, modified_at, file_hash, result)
             } else {
                 let result = process_text_file(
@@ -500,30 +493,28 @@ async fn process_incremental_files(
     // 流式并发执行：完成一个就处理一个，不等待全部完成
     let mut stream = futures_util::stream::iter(futures).buffer_unordered(threads);
 
-    while let Some((file_path, file_size, modified_at, file_hash, result)) =
-        tokio::select! {
-            next = stream.next() => next,
-            _ = cancel.cancelled() => {
-                log_info("增量处理阶段被取消");
-                // 写入已缓冲的数据，保证幂等性
-                if !batch_buffer.is_empty() {
-                    let meta_now = embed.now.to_string();
-                    if let Err(e) = store.batch_upsert(&batch_buffer).await {
-                        log_error(&format!("取消前写入剩余缓冲失败: {}", e));
-                    } else {
-                        for (path, hash) in &pending_meta {
-                            metadata::insert_meta(path, hash, &meta_now).ok();
-                        }
+    while let Some((file_path, file_size, modified_at, file_hash, result)) = tokio::select! {
+        next = stream.next() => next,
+        _ = cancel.cancelled() => {
+            log_info("增量处理阶段被取消");
+            // 写入已缓冲的数据，保证幂等性
+            if !batch_buffer.is_empty() {
+                let meta_now = embed.now.to_string();
+                if let Err(e) = store.batch_upsert(&batch_buffer).await {
+                    log_error(&format!("取消前写入剩余缓冲失败: {}", e));
+                } else {
+                    for (path, hash) in &pending_meta {
+                        metadata::insert_meta(path, hash, &meta_now).ok();
                     }
                 }
-                return ProcessResult {
-                    processed_files,
-                    error_count: counters.error_count,
-                    indexed_any: indexed_any || !batch_buffer.is_empty(),
-                };
             }
+            return ProcessResult {
+                processed_files,
+                error_count: counters.error_count,
+                indexed_any: indexed_any || !batch_buffer.is_empty(),
+            };
         }
-    {
+    } {
         counters.current_step += 1;
 
         send_progress(
@@ -684,7 +675,9 @@ pub async fn handle_start_index(
         Err(()) => return,
     };
 
-    if check_cancelled(cancel, &tx, token) { return; }
+    if check_cancelled(cancel, &tx, token) {
+        return;
+    }
 
     // 阶段 2：扫描文件系统（支持取消）
     send_progress(token, &tx, "scanning", 0, 1, None);
@@ -699,7 +692,9 @@ pub async fn handle_start_index(
     };
 
     // 阶段 3：差异分析
-    if check_cancelled(cancel, &tx, token) { return; }
+    if check_cancelled(cancel, &tx, token) {
+        return;
+    }
     send_progress(token, &tx, "comparing", 0, 1, None);
     let diff = match analyze_diff(token, &tx, &scan_result).await {
         Some(d) => d,
@@ -762,10 +757,15 @@ pub async fn handle_start_index(
 
     // 取消时仍然发送已完成的部分结果，不发 indexComplete
     if cancel.is_cancelled() {
-        send_via_channel(&tx, token, "indexCancelled", serde_json::json!({
-            "processedFiles": proc_result.processed_files.len(),
-            "errorCount": proc_result.error_count,
-        }));
+        send_via_channel(
+            &tx,
+            token,
+            "indexCancelled",
+            serde_json::json!({
+                "processedFiles": proc_result.processed_files.len(),
+                "errorCount": proc_result.error_count,
+            }),
+        );
         return;
     }
 
@@ -780,14 +780,17 @@ pub async fn handle_start_index(
     )
     .await;
 
-    if check_cancelled(cancel, &tx, token) { return; }
-
+    if check_cancelled(cancel, &tx, token) {
+        return;
+    }
 
     // 阶段 6：创建索引
     finalize_indexing(token, &tx, &mut ctx.store, &counters, &proc_result).await;
 
     // 阶段 7：优化 LanceDB
-    if check_cancelled(cancel, &tx, token) { return; }
+    if check_cancelled(cancel, &tx, token) {
+        return;
+    }
     optimize_lancedb(token, &tx, &ctx.store, cancel).await;
 
     // 全部阶段完成后，发送 indexComplete
