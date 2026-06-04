@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useMessage } from 'naive-ui'
 import { useExtension } from '../composables/useExtension'
+import { useThumbnail, buildThumbUrl } from '../composables/useThumbnail'
 import type { SearchResult } from '../types'
 import SearchBar from '../components/SearchBar.vue'
 import ResultCard from '../components/ResultCard.vue'
@@ -91,29 +92,7 @@ const visibleResults = computed(() => {
 
 const paddingTop = computed(() => startRow.value * (ITEM_HEIGHT + GAP))
 
-const thumbnailCache = ref<Record<string, string>>({})
-const nlPort = (window as any).NL_PORT as string | undefined
-
-function buildThumbUrl(filename: string): string {
-  if (!filename) return ''
-  const name = filename.split(/[\\/]/).pop() || filename
-  if (nlPort) {
-    return `http://localhost:${nlPort}/data/thumbnails/${name}`
-  }
-  // fallback（开发模式 NL_PORT 可能不可用）
-  return `/data/thumbnails/${name}`
-}
-
-function getThumbSrc(filePath: string, thumbnailPath: string): string {
-  if (thumbnailCache.value[filePath]) {
-    return thumbnailCache.value[filePath]
-  }
-  if (thumbnailPath) {
-    thumbnailCache.value[filePath] = buildThumbUrl(thumbnailPath)
-    return thumbnailCache.value[filePath]
-  }
-  return ''
-}
+const { getSrc: getThumbSrc, clearCache: clearThumbCache, cache: thumbnailCache } = useThumbnail()
 
 onMounted(() => {
   if (containerRef.value) {
@@ -129,7 +108,7 @@ onMounted(() => {
       if (r.offset === 0) {
         // 首次搜索：替换结果
         results.value = r.results || []
-        thumbnailCache.value = {}
+        clearThumbCache()
         if (r.total === 0) {
           message.info('未找到匹配结果')
           hasMore.value = false
@@ -368,7 +347,7 @@ onUnmounted(() => {
   justify-content: center;
   gap: 8px;
   padding: 16px;
-  color: #999;
+  color: var(--n-text-color-3);
 }
 
 .load-more-text {

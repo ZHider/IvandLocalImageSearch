@@ -116,7 +116,7 @@ const emit = defineEmits<{
 }
 
 .preview-meta {
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--n-border-color);
   padding-top: 12px;
   font-size: 13px;
 }
@@ -130,26 +130,26 @@ const emit = defineEmits<{
 
 .meta-label {
   min-width: 72px;
-  color: #999;
+  color: var(--n-text-color-3);
   flex-shrink: 0;
 }
 
 .meta-value {
-  color: #333;
+  color: var(--n-text-color);
   word-break: break-all;
 }
 
 .meta-path {
   font-size: 12px;
-  color: #666;
+  color: var(--n-text-color-2);
 }
 
 .meta-divider {
   font-size: 12px;
-  color: #999;
+  color: var(--n-text-color-3);
   margin: 8px 0 4px;
   font-weight: 500;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--n-border-color);
   padding-bottom: 4px;
 }
 </style>

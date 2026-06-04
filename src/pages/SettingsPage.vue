@@ -60,7 +60,7 @@ const menuOptions: MenuOption[] = [
       @save="doSave"
     />
     <ApiSettingsForm
-      v-else
+      v-else-if="activeTab === 'api'"
       :config="config"
       :saving="saving"
       :loading="loading"

@@ -123,15 +123,6 @@ onUnmounted(() => {
   max-width: 100%;
 }
 
-.app-logo {
-  font-size: 24px;
-}
-
-.app-title {
-  font-size: 16px;
-  font-weight: 600;
-  white-space: nowrap;
-}
 
 .nav-menu {
   flex-shrink: 0;

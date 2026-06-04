@@ -1,46 +1,40 @@
-import { ref, onMounted, onUnmounted, type Ref } from 'vue'
+import { ref, type Ref } from 'vue'
 import { useMessage } from 'naive-ui'
 import { useExtension } from './useExtension'
 import type { AppConfig, ApiTestResult } from '../types'
+
+const testing = ref(false)
+const testResult = ref<ApiTestResult | null>(null)
+const availableModels = ref<string[]>([])
+
+let initialized = false
 
 export function useApiTest(config: Ref<AppConfig>) {
   const message = useMessage()
   const { send, on } = useExtension()
 
-  const testing = ref(false)
-  const testResult = ref<ApiTestResult | null>(null)
-  const availableModels = ref<string[]>([])
+  if (!initialized) {
+    initialized = true
 
-  const cleanups: (() => void)[] = []
-
-  onMounted(() => {
-    cleanups.push(
-      on('apiConnectionResult', (data: unknown) => {
-        testing.value = false
-        const result = data as ApiTestResult
-        testResult.value = result
-        if (result.models && result.models.length > 0) {
-          availableModels.value = result.models
-        }
-        if (result.success) {
-          message.success('连接成功 ✅')
-        } else {
-          message.error(`连接失败: ${result.message}`)
-        }
-      })
-    )
-  })
-
-  onUnmounted(() => {
-    cleanups.forEach(stop => stop())
-    cleanups.length = 0
-  })
+    on('apiConnectionResult', (data: unknown) => {
+      testing.value = false
+      const result = data as ApiTestResult
+      testResult.value = result
+      if (result.models && result.models.length > 0) {
+        availableModels.value = result.models
+      }
+      if (result.success) {
+        message.success('连接成功 ✅')
+      } else {
+        message.error(`连接失败: ${result.message}`)
+      }
+    })
+  }
 
   function testConnection() {
     testing.value = true
     testResult.value = null
 
-    // 映射前端 apiType 到后端 provider
     const providerMap: Record<string, string> = {
       vllm: 'vllm',
       dashscope: 'dashscope',

@@ -61,7 +61,7 @@ function formatSimilarity(sim: number): string {
 
 <style scoped>
 .result-card {
-  background: #fff;
+  background: var(--n-color);
   border-radius: 8px;
   overflow: hidden;
   cursor: pointer;
@@ -151,12 +151,12 @@ function formatSimilarity(sim: number): string {
 
 .card-size {
   font-size: 12px;
-  color: #999;
+  color: var(--n-text-color-3);
 }
 
 .card-preview {
   font-size: 12px;
-  color: #888;
+  color: var(--n-text-color-3);
   line-height: 1.4;
   margin-top: 2px;
 }
